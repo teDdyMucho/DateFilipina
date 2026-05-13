@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Dimensions, ActivityIndicator,
+  Dimensions, ActivityIndicator, Share,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
@@ -15,33 +15,68 @@ import * as Haptics from 'expo-haptics';
 import { profileService } from '@/services/profileService';
 import { messageService } from '@/services/messageService';
 import { useFollowStatus, useToggleFollow } from '@/hooks/useProfile';
+import { useShareToFeed } from '@/hooks/useFeed';
 import { AvatarWithRing } from '@/components/AvatarWithRing';
 import { Colors, Gradients } from '@/constants/colors';
 import { useAuthStore } from '@/store/authStore';
 import { useSheet } from '@/components/GlobalActionSheet';
 import { MediaViewer, MediaItem } from '@/components/MediaViewer';
+import { CommentsModal } from '@/components/CommentsModal';
 
 const { width: W } = Dimensions.get('window');
 
 // ─── Post card (read-only, no edit/delete) ────────────────────────────────────
 
-function PublicPostCard({ post }: { post: any }) {
+function PublicPostCard({ post, profile }: { post: any; profile: any }) {
   const isVideo = post.media_type === 'video';
   const mediaUrl = post.media_urls?.[0];
+  const [showComments, setShowComments] = useState(false);
+  const { mutate: shareToFeed } = useShareToFeed();
+  const showSheet = useSheet();
+
+  const handleShare = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    showSheet({
+      title: 'Share Post',
+      options: [
+        {
+          label: 'Share to My Feed',
+          onPress: () => shareToFeed(
+            {
+              userId: profile?.id || '',
+              userName: profile?.name || 'Unknown',
+              userAvatar: profile?.avatar || '',
+              caption: post.caption || '',
+              imageUrl: mediaUrl || '',
+              mediaType: post.media_type || 'photo',
+            },
+            {
+              onSuccess: () => showSheet({ title: 'Shared!', message: `${profile?.name}'s post has been added to your feed.`, options: [{ label: 'OK' }] }),
+              onError: (e: any) => showSheet({ title: 'Error', message: e.message || 'Could not share post.', options: [{ label: 'OK' }] }),
+            }
+          ),
+        },
+        {
+          label: 'Share Externally',
+          onPress: () => Share.share({
+            message: `Check out ${profile?.name}'s post on Date A Filipina!${post.caption ? `\n\n"${post.caption}"` : ''}`,
+          }).catch(() => {}),
+        },
+        { label: 'Cancel' },
+      ],
+    });
+  };
 
   return (
     <View style={s.postCard}>
-      {/* Header row */}
       <View style={s.postHeader}>
         <Text style={s.postTime}>
           {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
         </Text>
       </View>
 
-      {/* Caption */}
       {post.caption ? <Text style={s.postCaption}>{post.caption}</Text> : null}
 
-      {/* Media */}
       {mediaUrl ? (
         isVideo ? (
           <Video
@@ -56,13 +91,24 @@ function PublicPostCard({ post }: { post: any }) {
         )
       ) : null}
 
-      {/* Stats */}
-      <View style={s.postStats}>
-        <Ionicons name="heart" size={15} color={Colors.primary} />
-        <Text style={s.postStatText}>{post.likes_count || 0}</Text>
-        <Ionicons name="chatbubble-outline" size={14} color={Colors.textMuted} style={{ marginLeft: 12 }} />
-        <Text style={s.postStatText}>{post.comments_count || 0}</Text>
+      {/* Actions — matches home feed for consistency */}
+      <View style={s.actions}>
+        <View style={s.actionsLeft}>
+          <View style={s.actionBtn}>
+            <Ionicons name="heart-outline" size={22} color={Colors.textSecondary} />
+            <Text style={s.actionCount}>{post.likes_count || 0}</Text>
+          </View>
+          <TouchableOpacity style={s.actionBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowComments(true); }} activeOpacity={0.7}>
+            <Ionicons name="chatbubble-outline" size={21} color={Colors.textSecondary} />
+            <Text style={s.actionCount}>{post.comments_count || 0}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.actionBtn} onPress={handleShare} activeOpacity={0.7}>
+            <Ionicons name="arrow-redo-outline" size={21} color={Colors.textSecondary} />
+          </TouchableOpacity>
+        </View>
       </View>
+
+      <CommentsModal visible={showComments} postId={post.id} onClose={() => setShowComments(false)} />
     </View>
   );
 }
@@ -100,18 +146,6 @@ export default function UserProfileScreen() {
     }
   };
 
-  const galleryItems: MediaItem[] = (filter === 'all' ? [] : (
-    (filter === 'photo' || filter === 'video')
-      ? (postsList => postsList)((posts || []).filter((p: any) =>
-          p.media_urls?.[0] && (filter === 'photo' ? p.media_type === 'photo' : p.media_type === 'video')
-        ))
-      : []
-  )).map((p: any) => ({
-    id: p.id,
-    url: p.media_urls[0],
-    type: (p.media_type === 'video' ? 'video' : 'photo') as 'video' | 'photo',
-  }));
-
   const openViewer = (idx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setViewerIndex(idx);
@@ -143,6 +177,20 @@ export default function UserProfileScreen() {
     if (filter === 'video') return p.media_type === 'video' && p.media_urls?.length > 0;
     return true;
   });
+
+  // Gallery items — every post with a media URL, filtered by photo/video
+  const mediaPosts = (posts || []).filter((p: any) => {
+    if (!p.media_urls?.[0]) return false;
+    if (filter === 'photo') return p.media_type === 'photo';
+    if (filter === 'video') return p.media_type === 'video';
+    return true;
+  });
+
+  const galleryItems: MediaItem[] = mediaPosts.map((p: any) => ({
+    id: p.id,
+    url: p.media_urls[0],
+    type: (p.media_type === 'video' ? 'video' : 'photo') as 'video' | 'photo',
+  }));
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -350,17 +398,17 @@ export default function UserProfileScreen() {
               <View style={{ padding: 40, alignItems: 'center' }}>
                 <ActivityIndicator color={Colors.primary} />
               </View>
-            ) : filtered.length === 0 ? (
-              <View style={s.emptyBox}>
-                <Ionicons
-                  name={filter === 'video' ? 'videocam-outline' : 'camera-outline'}
-                  size={52}
-                  color={Colors.textMuted}
-                />
-                <Text style={s.emptyText}>No {filter === 'video' ? 'videos' : filter === 'photo' ? 'photos' : 'posts'} yet</Text>
-              </View>
             ) : (filter === 'photo' || filter === 'video') ? (
-              // Gallery grid
+              galleryItems.length === 0 ? (
+                <View style={s.emptyBox}>
+                  <Ionicons
+                    name={filter === 'video' ? 'videocam-outline' : 'camera-outline'}
+                    size={52}
+                    color={Colors.textMuted}
+                  />
+                  <Text style={s.emptyText}>No {filter === 'video' ? 'videos' : 'photos'} yet</Text>
+                </View>
+              ) : (
               <View style={s.grid}>
                 {galleryItems.map((item, idx) => (
                   <TouchableOpacity
@@ -394,10 +442,16 @@ export default function UserProfileScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+              )
+            ) : filtered.length === 0 ? (
+              <View style={s.emptyBox}>
+                <Ionicons name="document-text-outline" size={52} color={Colors.textMuted} />
+                <Text style={s.emptyText}>No posts yet</Text>
+              </View>
             ) : (
               <View style={{ paddingTop: 8 }}>
                 {filtered.map((post: any) => (
-                  <PublicPostCard key={post.id} post={post} />
+                  <PublicPostCard key={post.id} post={post} profile={profile} />
                 ))}
               </View>
             )}
@@ -673,13 +727,20 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 12,
+    gap: 14,
   },
+  statGroup: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   postStatText: {
     color: Colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
-    marginLeft: 4,
   },
+  shareBtn: { padding: 4 },
+  // Match home feed actions row
+  actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8 },
+  actionsLeft: { flexDirection: 'row', alignItems: 'center' },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, padding: 8 },
+  actionCount: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
   emptyBox: {
     alignItems: 'center',
     paddingVertical: 60,

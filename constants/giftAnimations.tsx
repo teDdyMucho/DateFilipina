@@ -17,6 +17,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Dimensions, Easing } from 'react-native';
+import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -65,37 +66,28 @@ const shared = StyleSheet.create({
 
 // ── ANIMATIONS ────────────────────────────────────────────────────────────────
 
-/** 🌹 Rose — floats up with gentle sway */
-function RoseAnimation({ emoji, giftName, senderName, coins, onDone }: GiftAnimProps) {
-  const scale = useRef(new Animated.Value(0)).current;
+/** 🌹 Rose — plays Rose.gif full screen */
+function RoseAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) {
   const opacity = useRef(new Animated.Value(1)).current;
-  const sway = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(60)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scale, { toValue: 1, damping: 7, stiffness: 280, useNativeDriver: true }),
-      Animated.timing(translateY, { toValue: 0, duration: 600, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
-      Animated.loop(Animated.sequence([
-        Animated.timing(sway, { toValue: 12, duration: 500, useNativeDriver: true }),
-        Animated.timing(sway, { toValue: -12, duration: 500, useNativeDriver: true }),
-      ]), { iterations: 3 }),
-    ]).start();
     const t = setTimeout(() => {
-      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => onDone());
-    }, 2200);
+      Animated.timing(opacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => onDone());
+    }, 3000);
     return () => clearTimeout(t);
   }, []);
 
   return (
-    <View style={s.wrap} pointerEvents="none">
-      <Animated.Text style={[s.mainEmoji, { opacity, transform: [{ scale }, { translateY }, { translateX: sway }] }]}>
-        {emoji}
-      </Animated.Text>
-      <Animated.View style={{ opacity }}>
+    <Animated.View style={[s.wrap, { opacity }]} pointerEvents="none">
+      <Image
+        source={require('@/assets/gif/Rose.gif')}
+        style={s.fullVideo}
+        contentFit="contain"
+      />
+      <View style={s.bannerOverlay}>
         <SenderBanner senderName={senderName} giftName={giftName} coins={coins} />
-      </Animated.View>
-    </View>
+      </View>
+    </Animated.View>
   );
 }
 

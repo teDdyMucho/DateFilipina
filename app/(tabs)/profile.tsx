@@ -127,17 +127,21 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
         )
       ) : null}
 
-      {/* Footer stats */}
-      <View style={pc.footer}>
-        <View style={pc.statGroup}>
-          <Ionicons name="heart" size={16} color={Colors.primary} />
-          <Text style={pc.statText}>{post.likes_count || 0}</Text>
+      {/* Actions — same UI as home feed for consistency */}
+      <View style={pc.actions}>
+        <View style={pc.actionsLeft}>
+          <View style={pc.actionBtn}>
+            <Ionicons name="heart-outline" size={22} color={Colors.textSecondary} />
+            <Text style={pc.actionCount}>{post.likes_count || 0}</Text>
+          </View>
+          <TouchableOpacity style={pc.actionBtn} onPress={handleComments} activeOpacity={0.7}>
+            <Ionicons name="chatbubble-outline" size={21} color={Colors.textSecondary} />
+            <Text style={pc.actionCount}>{post.comments_count || 0}</Text>
+          </TouchableOpacity>
+          <View style={pc.actionBtn}>
+            <Ionicons name="arrow-redo-outline" size={21} color={Colors.textSecondary} />
+          </View>
         </View>
-        <TouchableOpacity style={pc.statGroup} onPress={handleComments} activeOpacity={0.7}>
-          <Ionicons name="chatbubble-outline" size={15} color={Colors.textMuted} />
-          <Text style={pc.statText}>{post.comments_count || 0}</Text>
-          <Text style={pc.statHint}>View comments</Text>
-        </TouchableOpacity>
       </View>
 
       <CommentsModal visible={showComments} postId={post.id} onClose={() => setShowComments(false)} />
@@ -215,6 +219,11 @@ const pc = StyleSheet.create({
   statGroup: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
   statHint: { color: Colors.textMuted, fontSize: 11, marginLeft: 4, fontWeight: '500' },
+  // Match home feed actions row
+  actions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8 },
+  actionsLeft: { flexDirection: 'row', alignItems: 'center' },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, padding: 8 },
+  actionCount: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600' },
   editOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', padding: 24 },
   editBox: { backgroundColor: Colors.card, borderRadius: 20, padding: 20, width: '100%', gap: 14, borderWidth: 1, borderColor: Colors.glassBorder },
   editTitle: { color: Colors.textPrimary, fontSize: 17, fontWeight: '800' },
