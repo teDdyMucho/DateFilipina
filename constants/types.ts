@@ -16,6 +16,10 @@ export interface User {
   likes: number;
   interests: string[];
   occupation: string;
+  isAdmin?: boolean;
+  isBanned?: boolean;
+  bannedReason?: string;
+  canStream?: boolean;
 }
 
 export interface Story {

@@ -16,6 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useFeed, useLikePost, useCreatePost, useDeletePost, useUpdatePost, useComments, useAddComment, useShareToFeed } from '@/hooks/useFeed';
 import { ActionSheet, ActionSheetOption } from '@/components/ActionSheet';
+import { ReportSheet } from '@/components/ReportSheet';
 import { useSheet } from '@/components/GlobalActionSheet';
 import { messageService } from '@/services/messageService';
 import { AvatarWithRing } from '@/components/AvatarWithRing';
@@ -554,6 +555,7 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
   const [showComments, setShowComments] = useState(false);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption || '');
   const lastTap = useRef(0);
   const router = useRouter();
@@ -641,7 +643,7 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
     { label: 'View Profile', onPress: () => router.push({ pathname: '/user/[id]', params: { id: post.user.id } } as any) },
     { label: 'Send Message', onPress: handleStartChat },
     { label: 'Share Post', onPress: handleShare },
-    { label: 'Report Post', onPress: () => showSheet({ title: 'Reported', message: 'Thank you for reporting.', options: [{ label: 'OK' }] }) },
+    { label: 'Report Post', onPress: () => setShowReport(true) },
     { label: 'Block User', style: 'destructive', onPress: () => showSheet({ title: 'Blocked', message: `${post.user.name} blocked.`, options: [{ label: 'OK' }] }) },
     { label: 'Cancel', style: 'cancel' },
   ];
@@ -741,6 +743,13 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
       </View>
 
       <CommentsModal visible={showComments} postId={post.id} onClose={() => setShowComments(false)} />
+      <ReportSheet
+        visible={showReport}
+        targetType="post"
+        targetId={post.id}
+        targetLabel={`${post.user.name}'s post`}
+        onClose={() => setShowReport(false)}
+      />
 
       <ActionSheet
         visible={showActionSheet}

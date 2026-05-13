@@ -34,6 +34,8 @@ export const discoverService = {
       .from('profiles')
       .select('id, name, age, bio, location, occupation, avatar_url, photos, interests, is_online, is_verified, is_live, last_seen_at')
       .not('id', 'in', `(${excludeIds.join(',')})`)
+      .neq('is_admin', true)   // admins are never in the swipe pool
+      .neq('is_banned', true)  // banned users are never visible to others
       .order('is_online', { ascending: false })
       .order('is_verified', { ascending: false })
       .order('last_seen_at', { ascending: false })
@@ -160,11 +162,13 @@ export const discoverService = {
 
     if (pendingIds.length === 0) return [];
 
-    // Step 4: Fetch their profiles
+    // Step 4: Fetch their profiles (exclude admins + banned)
     const { data: profiles, error: profErr } = await supabase
       .from('profiles')
       .select('id, name, age, bio, location, occupation, avatar_url, photos, interests, is_online, is_verified, is_live')
-      .in('id', pendingIds);
+      .in('id', pendingIds)
+      .neq('is_admin', true)
+      .neq('is_banned', true);
 
     if (profErr) throw new Error(profErr.message);
     if (!profiles) return [];

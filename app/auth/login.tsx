@@ -56,10 +56,12 @@ export default function LoginScreen() {
   const { mutate: login, isPending, error } = useLogin();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleLogin = () => {
-    if (!email.trim()) return;
-    if (!password.trim()) return;
+    setValidationError(null);
+    if (!email.trim()) return setValidationError('Please enter your email.');
+    if (!password.trim()) return setValidationError('Please enter your password.');
     login({ email: email.trim(), password });
   };
 
@@ -123,11 +125,11 @@ export default function LoginScreen() {
                 <Text style={styles.forgot}>Forgot Password?</Text>
               </TouchableOpacity>
 
-              {error && (
+              {(validationError || error) && (
                 <View style={styles.errorBox}>
                   <Ionicons name="alert-circle" size={16} color={Colors.error} />
                   <Text style={styles.error}>
-                    {(error as any)?.message || 'Invalid email or password.'}
+                    {validationError || (error as any)?.message || 'Invalid email or password.'}
                   </Text>
                 </View>
               )}

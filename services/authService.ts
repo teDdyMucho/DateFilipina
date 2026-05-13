@@ -10,6 +10,7 @@ function dbToUser(p: any): User {
     location: p.location || '',
     bio: p.bio || '',
     avatar: fixAvatarUri(p.avatar_url, p.id),
+    cover: p.cover_url || undefined,
     photos: p.photos || [],
     isOnline: p.is_online || false,
     isLive: p.is_live || false,
@@ -20,6 +21,10 @@ function dbToUser(p: any): User {
     likes: p.likes_count || 0,
     interests: p.interests || [],
     occupation: p.occupation || '',
+    isAdmin: p.is_admin || false,
+    isBanned: p.is_banned || false,
+    bannedReason: p.banned_reason || undefined,
+    canStream: p.can_stream !== false,
   };
 }
 

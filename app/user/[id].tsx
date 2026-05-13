@@ -22,6 +22,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useSheet } from '@/components/GlobalActionSheet';
 import { MediaViewer, MediaItem } from '@/components/MediaViewer';
 import { CommentsModal } from '@/components/CommentsModal';
+import { ReportSheet } from '@/components/ReportSheet';
 
 const { width: W } = Dimensions.get('window');
 
@@ -125,6 +126,7 @@ export default function UserProfileScreen() {
   const [creatingConv, setCreatingConv] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [showReportSheet, setShowReportSheet] = useState(false);
   const showSheet = useSheet();
 
   const myId = me?.id ?? '';
@@ -231,11 +233,25 @@ export default function UserProfileScreen() {
                 </TouchableOpacity>
                 <Text style={s.navTitleOverlay} numberOfLines={1}>{profile?.name}</Text>
                 {!isOwnProfile ? (
-                  <TouchableOpacity style={s.navBtnDark} onPress={handleMessage} disabled={creatingConv}>
-                    {creatingConv
-                      ? <ActivityIndicator size="small" color="#fff" />
-                      : <Ionicons name="chatbubble-ellipses-outline" size={20} color="#fff" />}
-                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity style={s.navBtnDark} onPress={handleMessage} disabled={creatingConv}>
+                      {creatingConv
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <Ionicons name="chatbubble-ellipses-outline" size={20} color="#fff" />}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.navBtnDark}
+                      onPress={() => showSheet({
+                        title: profile?.name || 'User',
+                        options: [
+                          { label: 'Report User', destructive: true, onPress: () => setShowReportSheet(true) },
+                          { label: 'Cancel' },
+                        ],
+                      })}
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                 ) : <View style={{ width: 40 }} />}
               </View>
             </SafeAreaView>
@@ -463,6 +479,13 @@ export default function UserProfileScreen() {
         items={galleryItems}
         initialIndex={viewerIndex}
         onClose={() => setViewerVisible(false)}
+      />
+      <ReportSheet
+        visible={showReportSheet}
+        targetType="user"
+        targetId={id || ''}
+        targetLabel={profile?.name || 'this user'}
+        onClose={() => setShowReportSheet(false)}
       />
     </View>
   );

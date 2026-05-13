@@ -9,7 +9,7 @@ const { width, height } = Dimensions.get('window');
 
 export default function SplashIndex() {
   const router = useRouter();
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, user } = useAuthStore();
 
   const logoScale = useRef(new Animated.Value(0.3)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -32,7 +32,7 @@ export default function SplashIndex() {
 
     const timer = setTimeout(() => {
       if (isAuthenticated) {
-        router.replace('/(tabs)/home');
+        router.replace(user?.isAdmin ? '/admin' : '/(tabs)/home');
       } else {
         router.replace('/auth/login');
       }

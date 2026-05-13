@@ -4,23 +4,60 @@ import { fixAvatarUri } from '@/constants/avatarUtils';
 
 export const feedService = {
   async getFeed(userId: string): Promise<FeedPost[]> {
-    const { data, error } = await supabase
-      .from('posts')
-      .select(`
-        id,
-        caption,
-        media_urls,
-        media_type,
-        likes_count,
-        comments_count,
-        created_at,
-        shared_from_user_id,
-        shared_from_user_name,
-        shared_from_user_avatar,
-        profiles!posts_user_id_fkey (id, name, avatar_url, is_online, is_verified)
-      `)
-      .order('created_at', { ascending: false })
-      .limit(30);
+    // Admin-hidden posts are filtered out; pinned posts surface first.
+    // Wrap in try/catch so the feed still works if the is_hidden / is_pinned
+    // columns haven't been migrated yet.
+    let data: any[] | null = null;
+    let error: any = null;
+    try {
+      const res = await supabase
+        .from('posts')
+        .select(`
+          id,
+          caption,
+          media_urls,
+          media_type,
+          likes_count,
+          comments_count,
+          is_pinned,
+          is_hidden,
+          created_at,
+          shared_from_user_id,
+          shared_from_user_name,
+          shared_from_user_avatar,
+          profiles!posts_user_id_fkey (id, name, avatar_url, is_online, is_verified)
+        `)
+        .eq('is_hidden', false)
+        .order('is_pinned', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(30);
+      data = res.data;
+      error = res.error;
+    } catch (e: any) {
+      error = e;
+    }
+    if (error && /is_pinned|is_hidden/i.test(error.message || '')) {
+      // Fallback for projects that haven't applied the admin migration yet
+      const fallback = await supabase
+        .from('posts')
+        .select(`
+          id,
+          caption,
+          media_urls,
+          media_type,
+          likes_count,
+          comments_count,
+          created_at,
+          shared_from_user_id,
+          shared_from_user_name,
+          shared_from_user_avatar,
+          profiles!posts_user_id_fkey (id, name, avatar_url, is_online, is_verified)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      data = fallback.data;
+      error = fallback.error;
+    }
 
     if (error) throw new Error(error.message);
     if (!data) return [];

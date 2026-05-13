@@ -21,6 +21,10 @@ function dbToUser(p: any): User {
     likes: p.likes_count || 0,
     interests: p.interests || [],
     occupation: p.occupation || '',
+    isAdmin: p.is_admin || false,
+    isBanned: p.is_banned || false,
+    bannedReason: p.banned_reason || undefined,
+    canStream: p.can_stream !== false,
   };
 }
 
@@ -32,6 +36,8 @@ export const profileService = {
       .eq('id', userId)
       .single();
     if (error) throw new Error(error.message);
+    // Admins are hidden from public profile views
+    if (data?.is_admin) throw new Error('User not found');
     return dbToUser(data);
   },
 

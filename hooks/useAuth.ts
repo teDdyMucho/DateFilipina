@@ -13,9 +13,18 @@ export function useLogin() {
     mutationFn: ({ email, password }: { email: string; password: string }) =>
       authService.login(email, password),
     onSuccess: ({ user, token }) => {
+      // Banned users: don't authenticate, redirect to banned screen with reason
+      if (user.isBanned) {
+        authService.logout(user.id).catch(() => {});
+        router.replace({
+          pathname: '/auth/banned',
+          params: { reason: user.bannedReason || '' },
+        } as any);
+        return;
+      }
       setAuth(user, token);
       setCoins(user.coins);
-      router.replace('/(tabs)/home');
+      router.replace(user.isAdmin ? '/admin' : '/(tabs)/home');
     },
   });
 }
@@ -31,7 +40,7 @@ export function useRegister() {
     onSuccess: ({ user, token }) => {
       setAuth(user, token);
       setCoins(user.coins);
-      router.replace('/(tabs)/home');
+      router.replace(user.isAdmin ? '/admin' : '/(tabs)/home');
     },
   });
 }

@@ -177,6 +177,9 @@ export const liveService = {
       onComment: (comment: LiveComment) => void;
       onGift: (gift: any) => void;
       onStreamEnded?: () => void;
+      onAdminForceEnd?: (reason: string) => void;
+      onAdminMuteAudio?: () => void;
+      onAdminMuteVideo?: () => void;
     },
     currentUserId: string,
     seenIds: Set<string>,
@@ -190,6 +193,18 @@ export const liveService = {
 
     channel.on('broadcast', { event: 'stream_ended' }, () => {
       callbacks.onStreamEnded?.();
+    });
+
+    channel.on('broadcast', { event: 'admin_force_end' }, ({ payload }) => {
+      callbacks.onAdminForceEnd?.(payload?.reason || 'Stream ended by an administrator');
+    });
+
+    channel.on('broadcast', { event: 'admin_mute_audio' }, () => {
+      callbacks.onAdminMuteAudio?.();
+    });
+
+    channel.on('broadcast', { event: 'admin_mute_video' }, () => {
+      callbacks.onAdminMuteVideo?.();
     });
 
     channel.on('broadcast', { event: 'heart' }, ({ payload }) => {
@@ -243,6 +258,31 @@ export const liveService = {
   roomSendStreamEnded(channel: RealtimeChannel | null) {
     const fn = (channel as any)?._safeSend;
     fn?.({ type: 'broadcast', event: 'stream_ended', payload: {} });
+  },
+
+  /**
+   * Admin-only: broadcast a one-shot event into a live room without
+   * being subscribed first. Used by the admin streams dashboard.
+   */
+  async adminBroadcast(streamId: string, event: string, payload: any = {}): Promise<void> {
+    const channel = supabase.channel(`live_room:${streamId}`, {
+      config: { broadcast: { ack: false, self: false } },
+    });
+    await new Promise<void>((resolve) => {
+      channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          channel.send({ type: 'broadcast', event, payload }).finally(() => {
+            channel.unsubscribe();
+            resolve();
+          });
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          channel.unsubscribe();
+          resolve();
+        }
+      });
+      // Safety timeout
+      setTimeout(() => { channel.unsubscribe(); resolve(); }, 3000);
+    });
   },
 
   roomSendHeart(channel: RealtimeChannel | null, fromUserId: string) {

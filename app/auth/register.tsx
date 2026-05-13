@@ -53,16 +53,24 @@ function ModernInput({
 export default function RegisterScreen() {
   const { mutate: register, isPending, error } = useRegister();
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', age: '' });
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  const update = (key: string) => (val: string) => setForm(f => ({ ...f, [key]: val }));
+  const update = (key: string) => (val: string) => {
+    setForm(f => ({ ...f, [key]: val }));
+    if (validationError) setValidationError(null);
+  };
 
   const handleRegister = () => {
-    if (!form.name.trim()) return;
-    if (!form.email.trim()) return;
+    setValidationError(null);
+    if (!form.name.trim()) return setValidationError('Please enter your full name.');
+    if (!form.email.trim()) return setValidationError('Please enter your email.');
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return setValidationError('Please enter a valid email address.');
+    if (!form.age.trim()) return setValidationError('Please enter your age.');
     const age = parseInt(form.age);
-    if (!age || age < 18) return;
-    if (!form.password || form.password.length < 6) return;
-    if (form.password !== form.confirmPassword) return;
+    if (!age || isNaN(age)) return setValidationError('Age must be a number.');
+    if (age < 18) return setValidationError('You must be 18 or older to register.');
+    if (!form.password || form.password.length < 6) return setValidationError('Password must be at least 6 characters.');
+    if (form.password !== form.confirmPassword) return setValidationError('Passwords do not match.');
     register({ name: form.name.trim(), email: form.email.trim(), password: form.password, age });
   };
 
@@ -159,11 +167,11 @@ export default function RegisterScreen() {
                 </View>
               )}
 
-              {error && (
+              {(validationError || error) && (
                 <View style={styles.errorBox}>
                   <Ionicons name="alert-circle" size={16} color={Colors.error} />
                   <Text style={styles.error}>
-                    {(error as any)?.message || 'Registration failed. Please try again.'}
+                    {validationError || (error as any)?.message || 'Registration failed. Please try again.'}
                   </Text>
                 </View>
               )}

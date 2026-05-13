@@ -30,6 +30,7 @@ import { useWalletStore } from '@/store/walletStore';
 import { useAuthStore } from '@/store/authStore';
 import { AGORA_APP_ID, AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL } from '@/services/agoraService';
 import { useSheet } from '@/components/GlobalActionSheet';
+import { ReportSheet } from '@/components/ReportSheet';
 
 const { width: W } = Dimensions.get('window');
 const CARD_W = (W - 44) / 2;
@@ -122,7 +123,9 @@ function FullscreenLive({ stream, isHost, onClose }: { stream: LiveStream; isHos
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'error'>('connecting');
   const [remoteUids, setRemoteUids] = useState<number[]>([]);
   const [engineReady, setEngineReady] = useState(false);
+  const [showReport, setShowReport] = useState(false);
   const [remoteVideoOff, setRemoteVideoOff] = useState(false);
+  const [forceEndReason, setForceEndReason] = useState<string | null>(null);
   const engineRef = useRef<IRtcEngine | null>(null);
   const roomChannelRef = useRef<RealtimeChannel | null>(null);
   const viewerChannelRef = useRef<RealtimeChannel | null>(null);
@@ -158,6 +161,33 @@ function FullscreenLive({ stream, isHost, onClose }: { stream: LiveStream; isHos
               message: `${stream.hostName}'s live has ended.`,
               options: [{ label: 'OK', onPress: onClose }],
             });
+          }
+        },
+        // Admin force-end — immediately close the stream on both host and viewers,
+        // then show a modal with the admin's reason. The user dismisses the modal
+        // to be sent back to the live tab listing.
+        onAdminForceEnd: (reason) => {
+          // Instantly tear down the Agora session so the host stops broadcasting
+          // and viewers stop receiving frames.
+          engineRef.current?.leaveChannel();
+          engineRef.current?.release();
+          engineRef.current = null;
+          setForceEndReason(reason || 'Your stream was ended by an administrator.');
+        },
+        // Admin mute-audio — only the host actually mutes their mic
+        onAdminMuteAudio: () => {
+          if (isHost) {
+            engineRef.current?.muteLocalAudioStream(true);
+            setMuted(true);
+            showSheet({ title: 'Audio Muted', message: 'An admin has muted your microphone.', options: [{ label: 'OK' }] });
+          }
+        },
+        // Admin mute-video — only the host actually mutes their camera
+        onAdminMuteVideo: () => {
+          if (isHost) {
+            engineRef.current?.muteLocalVideoStream(true);
+            setCamOff(true);
+            showSheet({ title: 'Video Muted', message: 'An admin has muted your camera.', options: [{ label: 'OK' }] });
           }
         },
       },
@@ -395,9 +425,23 @@ function FullscreenLive({ stream, isHost, onClose }: { stream: LiveStream; isHos
                 <Text style={s.endLiveText}>End Live</Text>
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={s.closeBtn} onPress={onClose}>
-                <Ionicons name="close" size={18} color="#fff" />
-              </TouchableOpacity>
+              <>
+                <TouchableOpacity
+                  style={s.ctrl}
+                  onPress={() => showSheet({
+                    title: stream.hostName,
+                    options: [
+                      { label: 'Report Stream', destructive: true, onPress: () => setShowReport(true) },
+                      { label: 'Cancel' },
+                    ],
+                  })}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={18} color="#fff" />
+                </TouchableOpacity>
+                <TouchableOpacity style={s.closeBtn} onPress={onClose}>
+                  <Ionicons name="close" size={18} color="#fff" />
+                </TouchableOpacity>
+              </>
             )}
           </View>
         </View>
@@ -530,6 +574,42 @@ function FullscreenLive({ stream, isHost, onClose }: { stream: LiveStream; isHos
       {gifts.map(g => (
         <CenterGiftAnimation key={g.key} gift={g} onComplete={() => setGifts(gs => gs.filter(x => x.key !== g.key))} />
       ))}
+
+      {/* Force-end modal — shows admin's reason; stream is already torn down */}
+      {forceEndReason && (
+        <View style={fe.backdrop} pointerEvents="auto">
+          <View style={fe.card}>
+            <View style={fe.iconWrap}>
+              <Ionicons name="warning" size={32} color="#FF453A" />
+            </View>
+            <Text style={fe.title}>{isHost ? 'Your Stream Was Ended' : 'Stream Ended by Admin'}</Text>
+            <Text style={fe.label}>REASON FROM ADMIN</Text>
+            <View style={fe.reasonBox}>
+              <Text style={fe.reasonText}>{forceEndReason}</Text>
+            </View>
+            {isHost && (
+              <Text style={fe.supportNote}>
+                If you think this is a mistake, contact support@dateafilipina.app
+              </Text>
+            )}
+            <TouchableOpacity
+              style={fe.okBtn}
+              onPress={() => { setForceEndReason(null); onClose(); }}
+              activeOpacity={0.85}
+            >
+              <Text style={fe.okText}>OK</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      <ReportSheet
+        visible={showReport}
+        targetType="stream"
+        targetId={stream.id}
+        targetLabel={`${stream.hostName}'s stream`}
+        onClose={() => setShowReport(false)}
+      />
     </View>
   );
 }
@@ -549,6 +629,15 @@ function GoLiveModal({ onClose, onStart }: { onClose: () => void; onStart: (stre
       return;
     }
     if (!user) return;
+    // Blocked from streaming by admin
+    if (user.canStream === false) {
+      showSheet({
+        title: 'Streaming Disabled',
+        message: 'Your streaming privileges have been revoked by an administrator. Contact support if you think this is a mistake.',
+        options: [{ label: 'OK' }],
+      });
+      return;
+    }
     setLoading(true);
     try {
       const stream = await liveService.startStream(user.id, title.trim(), category);
@@ -897,4 +986,18 @@ const s = StyleSheet.create({
   giftCardPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(255,215,0,0.15)', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, marginTop: 2 },
   giftCardCoinEmoji: { fontSize: 9 },
   giftCardPrice: { color: '#FFD700', fontSize: 10, fontWeight: '800' },
+});
+
+// Force-end modal (shown on host + viewer when admin force-ends)
+const fe = StyleSheet.create({
+  backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, zIndex: 9999, elevation: 9999 },
+  card: { width: '100%', backgroundColor: '#1a1a22', borderRadius: 22, padding: 22, gap: 10, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,69,58,0.3)' },
+  iconWrap: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(255,69,58,0.12)', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  title: { color: '#fff', fontSize: 19, fontWeight: '900', textAlign: 'center', letterSpacing: -0.3 },
+  label: { color: '#FF453A', fontSize: 10, fontWeight: '800', letterSpacing: 1.5, marginTop: 4 },
+  reasonBox: { width: '100%', padding: 14, borderRadius: 12, backgroundColor: 'rgba(255,69,58,0.08)', borderWidth: 1, borderColor: 'rgba(255,69,58,0.25)' },
+  reasonText: { color: '#fff', fontSize: 14, lineHeight: 20 },
+  supportNote: { color: 'rgba(255,255,255,0.5)', fontSize: 11, textAlign: 'center', lineHeight: 16, paddingHorizontal: 4 },
+  okBtn: { width: '100%', height: 48, borderRadius: 14, backgroundColor: '#FF453A', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  okText: { color: '#fff', fontSize: 15, fontWeight: '800' },
 });
