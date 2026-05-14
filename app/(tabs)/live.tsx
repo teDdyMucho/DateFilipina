@@ -28,7 +28,7 @@ import { liveService, LiveStream, LiveComment } from '@/services/liveService';
 import { GIFTS } from '@/constants';
 import { useWalletStore } from '@/store/walletStore';
 import { useAuthStore } from '@/store/authStore';
-import { AGORA_APP_ID, AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL } from '@/services/agoraService';
+import { AGORA_APP_ID, AGORA_TEST_CHANNEL, getAgoraToken } from '@/services/agoraService';
 import { useSheet } from '@/components/GlobalActionSheet';
 import { ReportSheet } from '@/components/ReportSheet';
 
@@ -248,7 +248,8 @@ function FullscreenLive({ stream, isHost, onClose }: { stream: LiveStream; isHos
       // Give RtcSurfaceView one render frame to mount before starting preview/publish
       setTimeout(async () => {
         if (isHost) engineRef.current?.startPreview();
-        await engineRef.current?.joinChannel(AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL, 0, {
+        const token = await getAgoraToken(AGORA_TEST_CHANNEL, 0, isHost ? 'publisher' : 'subscriber');
+        await engineRef.current?.joinChannel(token, AGORA_TEST_CHANNEL, 0, {
           clientRoleType: isHost ? ClientRoleType.ClientRoleBroadcaster : ClientRoleType.ClientRoleAudience,
           publishCameraTrack: isHost,
           publishMicrophoneTrack: isHost,

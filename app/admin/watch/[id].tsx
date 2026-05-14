@@ -10,7 +10,7 @@ import {
   ChannelProfileType, ClientRoleType,
 } from 'react-native-agora';
 import { Colors } from '@/constants/colors';
-import { AGORA_APP_ID, AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL } from '@/services/agoraService';
+import { AGORA_APP_ID, AGORA_TEST_CHANNEL, getAgoraToken } from '@/services/agoraService';
 import { supabase } from '@/services/supabase';
 import { fixAvatarUri } from '@/constants/avatarUtils';
 import { useEndStreamAsAdmin, useMuteStreamAudio, useMuteStreamVideo } from '@/hooks/useAdmin';
@@ -93,7 +93,8 @@ export default function AdminWatchScreen() {
         engine.enableAudio();
         setEngineReady(true);
         setTimeout(async () => {
-          await engineRef.current?.joinChannel(AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL, 0, {
+          const token = await getAgoraToken(AGORA_TEST_CHANNEL, 0, 'subscriber');
+          await engineRef.current?.joinChannel(token, AGORA_TEST_CHANNEL, 0, {
             clientRoleType: ClientRoleType.ClientRoleAudience,
             publishCameraTrack: false,
             publishMicrophoneTrack: false,

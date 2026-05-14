@@ -18,7 +18,7 @@ import {
 } from 'react-native-agora';
 import { callService, CallStatus } from '@/services/callService';
 import { useAuthStore } from '@/store/authStore';
-import { AGORA_APP_ID, AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL } from '@/services/agoraService';
+import { AGORA_APP_ID, AGORA_TEST_CHANNEL, getAgoraToken } from '@/services/agoraService';
 
 function PulsingRing({ size = 160, color = 'rgba(255,255,255,0.2)' }: { size?: number; color?: string }) {
   const scale = useRef(new Animated.Value(1)).current;
@@ -132,7 +132,8 @@ export default function CallScreen() {
       // Let RtcSurfaceView mount before starting preview/joining
       setTimeout(async () => {
         if (isVideo) engineRef.current?.startPreview();
-        await engineRef.current?.joinChannel(AGORA_TEMP_TOKEN, AGORA_TEST_CHANNEL, 0, {
+        const token = await getAgoraToken(AGORA_TEST_CHANNEL, 0, 'publisher');
+        await engineRef.current?.joinChannel(token, AGORA_TEST_CHANNEL, 0, {
           clientRoleType: ClientRoleType.ClientRoleBroadcaster,
           publishCameraTrack: isVideo,
           publishMicrophoneTrack: true,
