@@ -15,6 +15,10 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useFeed, useLikePost, useCreatePost, useDeletePost, useUpdatePost, useComments, useAddComment, useShareToFeed } from '@/hooks/useFeed';
 import { useFriendsForStories } from '@/hooks/useProfile';
+import { useActiveStories, useCreateStory } from '@/hooks/useStories';
+import { useUnreadCount } from '@/hooks/useNotifications';
+import { StoriesViewer } from '@/components/StoriesViewer';
+import { NotificationsModal } from '@/components/NotificationsModal';
 import { ActionSheet, ActionSheetOption } from '@/components/ActionSheet';
 import { ReportSheet } from '@/components/ReportSheet';
 import { useSheet } from '@/components/GlobalActionSheet';
@@ -537,10 +541,18 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
         </View>
       )}
 
-      {/* Header — show original poster when shared */}
+      {/* Header — show original poster when shared.
+          Tapping your own avatar goes to the Profile tab, not the stalk view. */}
       <View style={s.cardHeader}>
         <TouchableOpacity style={s.cardUser} activeOpacity={0.8}
-          onPress={() => router.push({ pathname: '/user/[id]', params: { id: post.sharedFrom ? post.sharedFrom.userId : post.user.id } } as any)}>
+          onPress={() => {
+            const targetId = post.sharedFrom ? post.sharedFrom.userId : post.user.id;
+            if (targetId === myId) {
+              router.push('/(tabs)/profile' as any);
+            } else {
+              router.push({ pathname: '/user/[id]', params: { id: targetId } } as any);
+            }
+          }}>
           <AvatarWithRing uri={post.sharedFrom ? fixAvatarUri(post.sharedFrom.userAvatar, post.sharedFrom.userId) : post.user.avatar} size={42} isOnline={post.user.isOnline} />
           <View style={{ gap: 2 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
@@ -664,10 +676,107 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
 
 // ─── Friends story strip ─────────────────────────────────────────────────────
 
-function FriendsStrip({ onCreatePost }: { onCreatePost: () => void }) {
+function FriendsStrip() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { data: friends = [] } = useFriendsForStories();
+  const { data: storyUsers = [] } = useActiveStories();
+  const { mutate: createStory, isPending: uploadingStory } = useCreateStory();
+  const showSheet = useSheet();
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerStartIndex, setViewerStartIndex] = useState(0);
+
+  // Map userId → their UserStories entry for fast lookup
+  const storyByUser = React.useMemo(() => {
+    const m = new Map<string, typeof storyUsers[number]>();
+    storyUsers.forEach(u => m.set(u.userId, u));
+    return m;
+  }, [storyUsers]);
+
+  const mineHasStory = !!(user && storyByUser.has(user.id));
+
+  const openViewerAtUser = (userId: string) => {
+    const i = storyUsers.findIndex(u => u.userId === userId);
+    if (i < 0) return;
+    setViewerStartIndex(i);
+    setViewerOpen(true);
+  };
+
+  const pickAndUploadStory = async (source: 'camera' | 'library') => {
+    try {
+      if (source === 'camera') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') {
+          showSheet({ title: 'Permission needed', message: 'Allow camera access in settings.', options: [{ label: 'OK' }] });
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 0.85,
+        });
+        if (result.canceled || !result.assets[0]) return;
+        createStory({ uri: result.assets[0].uri, type: 'photo' }, {
+          onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+          onError: (e: any) => showSheet({ title: 'Upload failed', message: e.message || 'Could not post your My Day.', options: [{ label: 'OK' }] }),
+        });
+      } else {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          showSheet({ title: 'Permission needed', message: 'Allow photo library access in settings.', options: [{ label: 'OK' }] });
+          return;
+        }
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 0.85,
+        });
+        if (result.canceled || !result.assets[0]) return;
+        createStory({ uri: result.assets[0].uri, type: 'photo' }, {
+          onSuccess: () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success),
+          onError: (e: any) => showSheet({ title: 'Upload failed', message: e.message || 'Could not post your My Day.', options: [{ label: 'OK' }] }),
+        });
+      }
+    } catch {}
+  };
+
+  const showMyDayPicker = () => {
+    showSheet({
+      title: 'Add to My Day',
+      message: 'Visible to friends for 24 hours.',
+      options: [
+        { label: 'Take Photo', onPress: () => pickAndUploadStory('camera') },
+        { label: 'Choose from Library', onPress: () => pickAndUploadStory('library') },
+        { label: 'Cancel', style: 'cancel' },
+      ],
+    });
+  };
+
+  // Tap on self avatar: My Day only (post creation is handled by the +
+  // button next to the DateFilipina title in the header).
+  // If I already have an active My Day, surface "View" and "Add" choices.
+  const handleSelfTap = () => {
+    if (mineHasStory) {
+      showSheet({
+        title: 'My Day',
+        options: [
+          { label: 'View My Day', onPress: () => openViewerAtUser(user!.id) },
+          { label: 'Add to My Day', onPress: showMyDayPicker },
+          { label: 'Cancel', style: 'cancel' },
+        ],
+      });
+    } else {
+      showMyDayPicker();
+    }
+  };
+
+  const handleFriendTap = (f: any) => {
+    if (storyByUser.has(f.id)) {
+      openViewerAtUser(f.id);
+    } else {
+      router.push({ pathname: '/user/[id]', params: { id: f.id } } as any);
+    }
+  };
 
   return (
     <View style={fs.wrap}>
@@ -676,50 +785,76 @@ function FriendsStrip({ onCreatePost }: { onCreatePost: () => void }) {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={fs.row}
       >
-        {/* Self avatar — tap to create a post */}
+        {/* Self avatar — tap shows My Day / Post choice */}
         <TouchableOpacity
           style={fs.item}
           activeOpacity={0.8}
-          onPress={onCreatePost}
+          onPress={handleSelfTap}
+          disabled={uploadingStory}
         >
-          <View style={fs.selfRing}>
-            <Image source={{ uri: user?.avatar || '' }} style={fs.avatar} contentFit="cover" />
-            <View style={fs.plusBadge}>
-              <Ionicons name="add" size={13} color="#fff" />
-            </View>
-          </View>
-          <Text style={fs.label} numberOfLines={1}>You</Text>
-        </TouchableOpacity>
-
-        {friends.map((f: any) => (
-          <TouchableOpacity
-            key={f.id}
-            style={fs.item}
-            activeOpacity={0.8}
-            onPress={() => router.push({ pathname: '/user/[id]', params: { id: f.id } } as any)}
-          >
+          {mineHasStory ? (
             <LinearGradient
-              colors={f.isLive
-                ? ['#FF3B30', '#FF9F0A']
-                : f.isOnline
-                  ? ['#FF3D6E', '#BF5AF2', '#5E5CE6']
-                  : ['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
+              colors={['#FF3D6E', '#BF5AF2', '#5E5CE6']}
               style={fs.ring}
               start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
             >
               <View style={fs.ringInner}>
-                <Image source={{ uri: f.avatar }} style={fs.avatar} contentFit="cover" />
+                <Image source={{ uri: user?.avatar || '' }} style={fs.avatar} contentFit="cover" />
               </View>
             </LinearGradient>
-            {f.isLive && (
-              <View style={fs.liveBadge}>
-                <Text style={fs.liveBadgeText}>LIVE</Text>
-              </View>
-            )}
-            <Text style={fs.label} numberOfLines={1}>{f.name}</Text>
-          </TouchableOpacity>
-        ))}
+          ) : (
+            <View style={fs.selfRing}>
+              <Image source={{ uri: user?.avatar || '' }} style={fs.avatar} contentFit="cover" />
+            </View>
+          )}
+          <View style={fs.plusBadge}>
+            <Ionicons name="add" size={13} color="#fff" />
+          </View>
+          <Text style={fs.label} numberOfLines={1}>You</Text>
+        </TouchableOpacity>
+
+        {friends.map((f: any) => {
+          const hasStory = storyByUser.has(f.id);
+          const ringColors: any = f.isLive
+            ? ['#FF3B30', '#FF9F0A']
+            : hasStory
+              ? ['#FF3D6E', '#BF5AF2', '#5E5CE6']
+              : f.isOnline
+                ? ['#FF3D6E', '#BF5AF2', '#5E5CE6']
+                : ['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)'];
+          return (
+            <TouchableOpacity
+              key={f.id}
+              style={fs.item}
+              activeOpacity={0.8}
+              onPress={() => handleFriendTap(f)}
+            >
+              <LinearGradient
+                colors={ringColors}
+                style={fs.ring}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              >
+                <View style={fs.ringInner}>
+                  <Image source={{ uri: f.avatar }} style={fs.avatar} contentFit="cover" />
+                </View>
+              </LinearGradient>
+              {f.isLive && (
+                <View style={fs.liveBadge}>
+                  <Text style={fs.liveBadgeText}>LIVE</Text>
+                </View>
+              )}
+              <Text style={fs.label} numberOfLines={1}>{f.name}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
+
+      <StoriesViewer
+        visible={viewerOpen}
+        users={storyUsers}
+        initialUserIndex={viewerStartIndex}
+        onClose={() => setViewerOpen(false)}
+      />
     </View>
   );
 }
@@ -748,6 +883,8 @@ export default function HomeScreen() {
   const showSheet = useSheet();
   const [refreshing, setRefreshing] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const { data: unreadCount = 0 } = useUnreadCount();
   const listRef = useRef<FlatList>(null);
   useScrollToTop(listRef);
   const [isFocused, setIsFocused] = useState(true);
@@ -789,13 +926,36 @@ export default function HomeScreen() {
     <View>
       <LinearGradient colors={[Colors.background, 'transparent']} style={s.topBarGrad}>
         <View style={s.topBarCentered}>
+          {/* + button left of title — creates a new feed post */}
+          <TouchableOpacity
+            style={s.headerPostBtn}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowCreate(true); }}
+            activeOpacity={0.6}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+          >
+            <Ionicons name="add" size={28} color={Colors.textPrimary} />
+          </TouchableOpacity>
           <Text style={s.brandTitle}>DateFilipina</Text>
           <Text style={s.brandTagline}>Find your match</Text>
+          {/* Notification bell on the right side — opens the notifications panel */}
+          <TouchableOpacity
+            style={s.headerBellBtn}
+            onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowNotifications(true); }}
+            activeOpacity={0.6}
+            hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
+          >
+            <Ionicons name="notifications-outline" size={26} color={Colors.textPrimary} />
+            {unreadCount > 0 && (
+              <View style={s.bellBadge}>
+                <Text style={s.bellBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
         </View>
       </LinearGradient>
 
       {/* Friends stories row — tap "You" + button to create a post */}
-      <FriendsStrip onCreatePost={() => setShowCreate(true)} />
+      <FriendsStrip />
 
       {isLoading && (
         <View style={s.loadingBox}>
@@ -845,6 +1005,7 @@ export default function HomeScreen() {
         />
       </SafeAreaView>
       <CreatePostModal visible={showCreate} onClose={() => setShowCreate(false)} />
+      <NotificationsModal visible={showNotifications} onClose={() => setShowNotifications(false)} />
     </View>
   );
 }
@@ -854,7 +1015,13 @@ export default function HomeScreen() {
 const s = StyleSheet.create({
   topBarGrad: { paddingBottom: 4 },
   // Centered brand header (no coin/notif buttons)
-  topBarCentered: { alignItems: 'center', justifyContent: 'center', paddingTop: 12, paddingBottom: 10, gap: 2 },
+  topBarCentered: { alignItems: 'center', justifyContent: 'center', paddingTop: 12, paddingBottom: 10, gap: 2, position: 'relative' },
+  // + icon anchored to the left of the centered title — creates a new feed post
+  headerPostBtn: { position: 'absolute', left: 18, top: 18, padding: 2 },
+  // Bell icon anchored to the right of the centered title — opens notifications
+  headerBellBtn: { position: 'absolute', right: 18, top: 18, padding: 2 },
+  bellBadge: { position: 'absolute', top: -2, right: -4, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.primary, borderWidth: 2, borderColor: Colors.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  bellBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
   brandTitle: {
     fontSize: 28,
     fontWeight: '900',

@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
+import { VideoPlayer } from '@/components/VideoPlayer';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,11 +27,80 @@ import { ReportSheet } from '@/components/ReportSheet';
 
 const { width: W } = Dimensions.get('window');
 
-// ─── Post card (read-only, no edit/delete) ────────────────────────────────────
+// ─── Media helpers ────────────────────────────────────────────────────────────
+
+// Detect video by file extension as fallback when media_types column isn't present.
+const isVideoUrl = (u: string) => /\.(mp4|mov|m4v|webm|3gp|mkv)(\?|$)/i.test(u || '');
+
+function getPostMediaTypes(post: any): Array<'photo' | 'video'> {
+  const urls: string[] = post.media_urls || [];
+  const explicit: string[] | undefined =
+    post.media_types && post.media_types.length === urls.length ? post.media_types : undefined;
+  const fallback = post.media_type === 'video' ? 'video' : 'photo';
+  return urls.map((u, i) => {
+    if (explicit) return (explicit[i] === 'video' ? 'video' : 'photo');
+    if (isVideoUrl(u)) return 'video';
+    return fallback;
+  });
+}
+
+// Horizontal paging swiper for multi-item posts — matches profile/home behavior.
+function PublicPostSwiper({ urls, types }: { urls: string[]; types: Array<'photo' | 'video'> }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const onMomentumScrollEnd = (e: any) => {
+    const i = Math.round(e.nativeEvent.contentOffset.x / W);
+    if (i !== activeIndex) {
+      Haptics.selectionAsync();
+      setActiveIndex(i);
+    }
+  };
+
+  if (urls.length === 1) {
+    return types[0] === 'video' ? (
+      <VideoPlayer uri={urls[0]} />
+    ) : (
+      <Image source={{ uri: urls[0] }} style={s.postMedia} contentFit="cover" />
+    );
+  }
+
+  return (
+    <View style={{ width: '100%' }}>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        bounces={false}
+        overScrollMode="never"
+        decelerationRate="fast"
+      >
+        {urls.map((url, i) => (
+          <View key={`${url}-${i}`} style={{ width: W }}>
+            {types[i] === 'video' ? (
+              <VideoPlayer uri={url} isVisible={i === activeIndex} />
+            ) : (
+              <Image source={{ uri: url }} style={s.postMedia} contentFit="cover" />
+            )}
+          </View>
+        ))}
+      </ScrollView>
+      <View style={s.mediaCounter} pointerEvents="none">
+        <Text style={s.mediaCounterText}>{activeIndex + 1}/{urls.length}</Text>
+      </View>
+      <View style={s.mediaDots} pointerEvents="none">
+        {urls.map((_, i) => (
+          <View key={i} style={[s.mediaDot, i === activeIndex && s.mediaDotActive]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ─── Post card (read-only, full-width feed-style with multi-media swipe) ──────
 
 function PublicPostCard({ post, profile }: { post: any; profile: any }) {
-  const isVideo = post.media_type === 'video';
-  const mediaUrl = post.media_urls?.[0];
+  const urls: string[] = post.media_urls || [];
+  const types = getPostMediaTypes(post);
   const [showComments, setShowComments] = useState(false);
   const { mutate: shareToFeed } = useShareToFeed();
   const showSheet = useSheet();
@@ -48,7 +118,7 @@ function PublicPostCard({ post, profile }: { post: any; profile: any }) {
               userName: profile?.name || 'Unknown',
               userAvatar: profile?.avatar || '',
               caption: post.caption || '',
-              imageUrl: mediaUrl || '',
+              imageUrl: urls[0] || '',
               mediaType: post.media_type || 'photo',
             },
             {
@@ -70,26 +140,32 @@ function PublicPostCard({ post, profile }: { post: any; profile: any }) {
 
   return (
     <View style={s.postCard}>
-      <View style={s.postHeader}>
-        <Text style={s.postTime}>
-          {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
-        </Text>
+      {/* Header — avatar + name + time, like home feed */}
+      <View style={s.cardHeader}>
+        <AvatarWithRing uri={profile?.avatar || ''} size={38} isOnline={profile?.isOnline} />
+        <View style={{ flex: 1, gap: 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+            <Text style={s.cardName}>{profile?.name || 'User'}</Text>
+            {profile?.isVerified && <Ionicons name="checkmark-circle" size={14} color={Colors.primary} />}
+          </View>
+          <Text style={s.postTime}>
+            {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
+          </Text>
+        </View>
       </View>
 
-      {post.caption ? <Text style={s.postCaption}>{post.caption}</Text> : null}
+      {/* Caption above media when there's no media (text-only post) */}
+      {post.caption && urls.length === 0 ? <Text style={s.postCaption}>{post.caption}</Text> : null}
 
-      {mediaUrl ? (
-        isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
-            style={s.postMedia}
-            resizeMode={ResizeMode.COVER}
-            useNativeControls
-            shouldPlay={false}
-          />
-        ) : (
-          <Image source={{ uri: mediaUrl }} style={s.postMedia} contentFit="cover" />
-        )
+      {/* Media — single item or multi-item swiper */}
+      {urls.length > 0 ? <PublicPostSwiper urls={urls} types={types} /> : null}
+
+      {/* Caption below media when there's media — matches home feed inline style */}
+      {post.caption && urls.length > 0 ? (
+        <View style={s.captionRow}>
+          <Text style={s.captionName}>{(profile?.name || 'User').split(' ')[0]} </Text>
+          <Text style={s.captionText}>{post.caption}</Text>
+        </View>
       ) : null}
 
       {/* Actions — matches home feed for consistency */}
@@ -173,26 +249,27 @@ export default function UserProfileScreen() {
   const toggle = (type: 'photo' | 'video') =>
     setFilter(f => (f === type ? 'all' : type));
 
+  // Filter posts that contain ANY item matching the type — handles mixed multi-media posts
   const filtered = (posts || []).filter((p: any) => {
-    if (filter === 'all') return true;
-    if (filter === 'photo') return p.media_type === 'photo' && p.media_urls?.length > 0;
-    if (filter === 'video') return p.media_type === 'video' && p.media_urls?.length > 0;
-    return true;
+    if (filter === 'all') return (p.media_urls?.length ?? 0) > 0 || p.caption;
+    const types = getPostMediaTypes(p);
+    return types.some(t => t === filter);
   });
 
-  // Gallery items — every post with a media URL, filtered by photo/video
-  const mediaPosts = (posts || []).filter((p: any) => {
-    if (!p.media_urls?.[0]) return false;
-    if (filter === 'photo') return p.media_type === 'photo';
-    if (filter === 'video') return p.media_type === 'video';
-    return true;
+  // Flatten gallery: one cell per matching media item across all posts.
+  // Multi-media posts can contribute multiple cells under either filter.
+  const galleryItems: MediaItem[] = (posts || []).flatMap((p: any) => {
+    const urls: string[] = p.media_urls || [];
+    const types = getPostMediaTypes(p);
+    return urls
+      .map((url, i) => ({ url, type: types[i], postId: p.id, idx: i }))
+      .filter(item => filter === 'all' ? true : item.type === filter)
+      .map(item => ({
+        id: `${item.postId}-${item.idx}`,
+        url: item.url,
+        type: item.type as 'video' | 'photo',
+      }));
   });
-
-  const galleryItems: MediaItem[] = mediaPosts.map((p: any) => ({
-    id: p.id,
-    url: p.media_urls[0],
-    type: (p.media_type === 'video' ? 'video' : 'photo') as 'video' | 'photo',
-  }));
 
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
@@ -465,9 +542,12 @@ export default function UserProfileScreen() {
                 <Text style={s.emptyText}>No posts yet</Text>
               </View>
             ) : (
-              <View style={{ paddingTop: 8 }}>
-                {filtered.map((post: any) => (
-                  <PublicPostCard key={post.id} post={post} profile={profile} />
+              <View>
+                {filtered.map((post: any, i: number) => (
+                  <React.Fragment key={post.id}>
+                    {i > 0 ? <View style={s.feedSeparator} /> : null}
+                    <PublicPostCard post={post} profile={profile} />
+                  </React.Fragment>
                 ))}
               </View>
             )}
@@ -716,35 +796,23 @@ const s = StyleSheet.create({
   filterLabelActive: {
     color: Colors.primary,
   },
-  postCard: {
-    backgroundColor: Colors.card,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
-  },
-  postHeader: {
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-  postTime: {
-    color: Colors.textMuted,
-    fontSize: 12,
-  },
-  postCaption: {
-    color: Colors.textPrimary,
-    fontSize: 15,
-    lineHeight: 21,
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-  },
-  postMedia: {
-    width: '100%',
-    aspectRatio: 4 / 3,
-  },
+  // Full-width feed style — matches home page and profile page
+  postCard: { backgroundColor: Colors.background },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
+  cardName: { color: Colors.textPrimary, fontWeight: '700', fontSize: 15 },
+  postTime: { color: Colors.textMuted, fontSize: 12 },
+  postCaption: { color: Colors.textPrimary, fontSize: 15, lineHeight: 21, paddingHorizontal: 16, paddingBottom: 8 },
+  postMedia: { width: W, height: W * 0.75 },
+  captionRow: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingBottom: 8, paddingTop: 4 },
+  captionName: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  captionText: { fontSize: 14, color: Colors.textPrimary, flex: 1 },
+  feedSeparator: { height: 8, backgroundColor: Colors.separator },
+  // Multi-media pager indicators
+  mediaCounter: { position: 'absolute', top: 10, right: 10, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)' },
+  mediaCounterText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  mediaDots: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 },
+  mediaDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  mediaDotActive: { backgroundColor: '#fff', width: 14 },
   postStats: {
     flexDirection: 'row',
     alignItems: 'center',
