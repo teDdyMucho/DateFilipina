@@ -37,6 +37,9 @@ export interface FeedPost {
   id: string;
   user: Pick<User, 'id' | 'name' | 'avatar' | 'isVerified' | 'isOnline'>;
   imageUrl: string;
+  mediaUrls?: string[];
+  mediaTypes?: Array<'photo' | 'video'>;
+  mediaType?: 'photo' | 'video';
   caption: string;
   likes: number;
   comments: number;

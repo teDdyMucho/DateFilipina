@@ -18,7 +18,6 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated, Dimensions, Easing } from 'react-native';
 import { Image } from 'expo-image';
-import { Video, ResizeMode } from 'expo-av';
 
 const { width: W, height: H } = Dimensions.get('window');
 
@@ -91,12 +90,11 @@ function RoseAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) {
   );
 }
 
-/** ❤️ Heart — plays Heart.mp4 video animation full screen */
+/** ❤️ Heart — plays heart.gif full screen */
 function HeartAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) {
   const opacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Auto-finish after the video duration (~3s)
     const t = setTimeout(() => {
       Animated.timing(opacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => onDone());
     }, 3000);
@@ -105,13 +103,10 @@ function HeartAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) 
 
   return (
     <Animated.View style={[s.wrap, { opacity }]} pointerEvents="none">
-      <Video
-        source={require('@/assets/gif/Heart.mp4')}
+      <Image
+        source={require('@/assets/gif/heart.gif')}
         style={s.fullVideo}
-        resizeMode={ResizeMode.CONTAIN}
-        shouldPlay
-        isLooping={false}
-        isMuted
+        contentFit="contain"
       />
       <View style={s.bannerOverlay}>
         <SenderBanner senderName={senderName} giftName={giftName} coins={coins} />
@@ -120,78 +115,53 @@ function HeartAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) 
   );
 }
 
-/** 💎 Diamond — spins in with sparkle flash */
-function DiamondAnimation({ emoji, giftName, senderName, coins, onDone }: GiftAnimProps) {
-  const scale = useRef(new Animated.Value(0)).current;
-  const rotate = useRef(new Animated.Value(0)).current;
+/** 💎 Diamond — plays diamond.gif full screen */
+function DiamondAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) {
   const opacity = useRef(new Animated.Value(1)).current;
-  const flash = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(scale, { toValue: 1, damping: 6, stiffness: 300, useNativeDriver: true }),
-      Animated.timing(rotate, { toValue: 1, duration: 700, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-    ]).start();
-    Animated.sequence([
-      Animated.delay(300),
-      Animated.timing(flash, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.timing(flash, { toValue: 0, duration: 200, useNativeDriver: true }),
-      Animated.timing(flash, { toValue: 0.7, duration: 150, useNativeDriver: true }),
-      Animated.timing(flash, { toValue: 0, duration: 300, useNativeDriver: true }),
-    ]).start();
     const t = setTimeout(() => {
-      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => onDone());
-    }, 2400);
+      Animated.timing(opacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => onDone());
+    }, 3000);
     return () => clearTimeout(t);
   }, []);
 
-  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['-180deg', '0deg'] });
-
   return (
-    <View style={s.wrap} pointerEvents="none">
-      <Animated.View style={[s.flashRing, { opacity: flash }]} />
-      <Animated.Text style={[s.mainEmoji, { opacity, transform: [{ scale }, { rotate: spin }] }]}>
-        {emoji}
-      </Animated.Text>
-      <Animated.View style={{ opacity }}>
+    <Animated.View style={[s.wrap, { opacity }]} pointerEvents="none">
+      <Image
+        source={require('@/assets/gif/diamond.gif')}
+        style={s.fullVideo}
+        contentFit="contain"
+      />
+      <View style={s.bannerOverlay}>
         <SenderBanner senderName={senderName} giftName={giftName} coins={coins} />
-      </Animated.View>
-    </View>
+      </View>
+    </Animated.View>
   );
 }
 
-/** 👑 Crown — drops from top with bounce */
-function CrownAnimation({ emoji, giftName, senderName, coins, onDone }: GiftAnimProps) {
-  const translateY = useRef(new Animated.Value(-H * 0.4)).current;
-  const scale = useRef(new Animated.Value(0.5)).current;
+/** 👑 Crown — plays crown.gif full screen */
+function CrownAnimation({ giftName, senderName, coins, onDone }: GiftAnimProps) {
   const opacity = useRef(new Animated.Value(1)).current;
-  const glow = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.spring(translateY, { toValue: 0, damping: 9, stiffness: 180, useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, damping: 9, stiffness: 180, useNativeDriver: true }),
-    ]).start();
-    Animated.loop(Animated.sequence([
-      Animated.timing(glow, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.timing(glow, { toValue: 0.3, duration: 600, useNativeDriver: true }),
-    ])).start();
     const t = setTimeout(() => {
-      Animated.timing(opacity, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => onDone());
-    }, 2500);
+      Animated.timing(opacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => onDone());
+    }, 3000);
     return () => clearTimeout(t);
   }, []);
 
   return (
-    <View style={s.wrap} pointerEvents="none">
-      <Animated.View style={[s.crownGlow, { opacity: glow }]} />
-      <Animated.Text style={[s.mainEmoji, { opacity, transform: [{ translateY }, { scale }] }]}>
-        {emoji}
-      </Animated.Text>
-      <Animated.View style={{ opacity }}>
+    <Animated.View style={[s.wrap, { opacity }]} pointerEvents="none">
+      <Image
+        source={require('@/assets/gif/crown.gif')}
+        style={s.fullVideo}
+        contentFit="contain"
+      />
+      <View style={s.bannerOverlay}>
         <SenderBanner senderName={senderName} giftName={giftName} coins={coins} />
-      </Animated.View>
-    </View>
+      </View>
+    </Animated.View>
   );
 }
 

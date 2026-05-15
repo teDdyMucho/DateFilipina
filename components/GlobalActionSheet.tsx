@@ -3,6 +3,7 @@ import { ActionSheet, ActionSheetOption } from './ActionSheet';
 
 interface SheetConfig {
   title?: string;
+  message?: string;
   options: ActionSheetOption[];
 }
 
@@ -19,6 +20,7 @@ export function GlobalActionSheetProvider({ children }: { children: React.ReactN
       <ActionSheet
         visible={!!config}
         title={config?.title}
+        message={config?.message}
         options={config?.options ?? []}
         onClose={hide}
       />

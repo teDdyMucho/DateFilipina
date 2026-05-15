@@ -73,7 +73,30 @@ export const feedService = {
       if (likes) likes.forEach((l: any) => likedSet.add(l.post_id));
     }
 
-    return data.map((row: any) => ({
+    // Shuffle non-pinned posts so the home feed feels fresh on each refresh.
+    // Pinned posts stay at the top (their order is preserved among themselves).
+    const pinned = data.filter((r: any) => r.is_pinned);
+    const rest = data.filter((r: any) => !r.is_pinned);
+    for (let i = rest.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [rest[i], rest[j]] = [rest[j], rest[i]];
+    }
+    const ordered = [...pinned, ...rest];
+
+    return ordered.map((row: any) => {
+      const urls: string[] = row.media_urls || [];
+      const explicitTypes: string[] | undefined = row.media_types && row.media_types.length === urls.length ? row.media_types : undefined;
+      const fallbackType = row.media_type || 'photo';
+      // Detect video by file extension as a robust fallback — needed when the
+      // media_types column hasn't been migrated yet (legacy single media_type
+      // column only stores the FIRST item's type, so mixed posts mis-detect).
+      const isVideoUrl = (u: string) => /\.(mp4|mov|m4v|webm|3gp|mkv)(\?|$)/i.test(u || '');
+      const types: Array<'photo' | 'video'> = urls.map((u, i) => {
+        if (explicitTypes) return explicitTypes[i] as any;
+        if (isVideoUrl(u)) return 'video';
+        return fallbackType;
+      });
+      return {
       id: row.id,
       user: {
         id: row.profiles.id,
@@ -82,9 +105,10 @@ export const feedService = {
         isOnline: row.profiles.is_online || false,
         isVerified: row.profiles.is_verified || false,
       },
-      imageUrl: row.media_urls?.[0] || '',
-      mediaUrls: row.media_urls || [],
-      mediaType: row.media_type || 'photo',
+      imageUrl: urls[0] || '',
+      mediaUrls: urls,
+      mediaTypes: types,
+      mediaType: fallbackType,
       caption: row.caption || '',
       likes: row.likes_count || 0,
       comments: row.comments_count || 0,
@@ -95,7 +119,8 @@ export const feedService = {
         userName: row.shared_from_user_name || 'Unknown',
         userAvatar: fixAvatarUri(row.shared_from_user_avatar, row.shared_from_user_id),
       } : undefined,
-    }));
+      };
+    });
   },
 
   async toggleLike(postId: string, userId: string, isLiked: boolean): Promise<void> {
@@ -152,6 +177,24 @@ export const feedService = {
       media_type: mediaType,
     });
     if (error) throw new Error(error.message);
+  },
+
+  // Multi-media post: photos + videos mixed, in order.
+  // media_type stores the type of the FIRST item (legacy column),
+  // media_types stores the full array (new column).
+  async createPostMulti(userId: string, urls: string[], types: Array<'photo' | 'video'>, caption: string): Promise<void> {
+    const payload: any = {
+      user_id: userId,
+      caption,
+      media_urls: urls,
+      media_type: types[0] || 'photo',
+    };
+    // Try with media_types array. If column doesn't exist (older DB), fall back.
+    let res = await supabase.from('posts').insert({ ...payload, media_types: types });
+    if (res.error && /media_types/i.test(res.error.message)) {
+      res = await supabase.from('posts').insert(payload);
+    }
+    if (res.error) throw new Error(res.error.message);
   },
 
   async sharePostToFeed(

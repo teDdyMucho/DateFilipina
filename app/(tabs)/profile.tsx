@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { AvatarWithRing } from '@/components/AvatarWithRing';
+import { VideoPlayer } from '@/components/VideoPlayer';
 import { GradientButton } from '@/components/GradientButton';
 import { GlassCard } from '@/components/GlassCard';
 import { Colors, Gradients } from '@/constants/colors';
@@ -81,6 +82,74 @@ function StatBox({ value, label }: { value: number; label: string }) {
   );
 }
 
+// Detect video by file extension as fallback when media_types column isn't present.
+// Mirrors the logic in services/feedService.ts so the profile view classifies
+// the same way as the home feed.
+const isVideoUrl = (u: string) => /\.(mp4|mov|m4v|webm|3gp|mkv)(\?|$)/i.test(u || '');
+
+function getPostMediaTypes(post: any): Array<'photo' | 'video'> {
+  const urls: string[] = post.media_urls || [];
+  const explicit: string[] | undefined =
+    post.media_types && post.media_types.length === urls.length ? post.media_types : undefined;
+  const fallback = post.media_type === 'video' ? 'video' : 'photo';
+  return urls.map((u, i) => {
+    if (explicit) return (explicit[i] === 'video' ? 'video' : 'photo');
+    if (isVideoUrl(u)) return 'video';
+    return fallback;
+  });
+}
+
+function PostMediaSwiper({ urls, types }: { urls: string[]; types: Array<'photo' | 'video'> }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const onMomentumScrollEnd = (e: any) => {
+    const i = Math.round(e.nativeEvent.contentOffset.x / W);
+    if (i !== activeIndex) {
+      Haptics.selectionAsync();
+      setActiveIndex(i);
+    }
+  };
+
+  if (urls.length === 1) {
+    return types[0] === 'video' ? (
+      <VideoPlayer uri={urls[0]} />
+    ) : (
+      <Image source={{ uri: urls[0] }} style={pc.media} contentFit="cover" />
+    );
+  }
+
+  return (
+    <View style={{ width: '100%' }}>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        bounces={false}
+        overScrollMode="never"
+        decelerationRate="fast"
+      >
+        {urls.map((url, i) => (
+          <View key={`${url}-${i}`} style={{ width: W }}>
+            {types[i] === 'video' ? (
+              <VideoPlayer uri={url} isVisible={i === activeIndex} />
+            ) : (
+              <Image source={{ uri: url }} style={pc.media} contentFit="cover" />
+            )}
+          </View>
+        ))}
+      </ScrollView>
+      <View style={pc.counter} pointerEvents="none">
+        <Text style={pc.counterText}>{activeIndex + 1}/{urls.length}</Text>
+      </View>
+      <View style={pc.dots} pointerEvents="none">
+        {urls.map((_, i) => (
+          <View key={i} style={[pc.dot, i === activeIndex && pc.dotActive]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function MyPostCard({ post, user }: { post: any; user: any }) {
   const { mutate: deletePost } = useDeletePost();
   const { mutate: updatePost } = useUpdatePost();
@@ -89,8 +158,9 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption || '');
-  const isVideo = post.media_type === 'video';
-  const mediaUrl = post.media_urls?.[0];
+
+  const urls: string[] = post.media_urls || [];
+  const types = getPostMediaTypes(post);
 
   const handleOptions = () => setShowActionSheet(true);
   const handleComments = () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowComments(true); };
@@ -112,20 +182,8 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
       {/* Caption */}
       {post.caption ? <Text style={pc.caption}>{post.caption}</Text> : null}
 
-      {/* Media */}
-      {mediaUrl ? (
-        isVideo ? (
-          <Video
-            source={{ uri: mediaUrl }}
-            style={pc.media}
-            resizeMode={ResizeMode.COVER}
-            useNativeControls
-            shouldPlay={false}
-          />
-        ) : (
-          <Image source={{ uri: mediaUrl }} style={pc.media} contentFit="cover" />
-        )
-      ) : null}
+      {/* Media — supports multi-item swipe */}
+      {urls.length > 0 ? <PostMediaSwiper urls={urls} types={types} /> : null}
 
       {/* Actions — same UI as home feed for consistency */}
       <View style={pc.actions}>
@@ -208,13 +266,19 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
 }
 
 const pc = StyleSheet.create({
-  card: { backgroundColor: Colors.card, marginHorizontal: 16, marginBottom: 14, borderRadius: 18, overflow: 'hidden', borderWidth: 1, borderColor: Colors.glassBorder },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, paddingBottom: 10 },
+  // Match home feed: full-width post, no card border / margin / radius.
+  card: { backgroundColor: Colors.background },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   name: { color: Colors.textPrimary, fontWeight: '700', fontSize: 15 },
   time: { color: Colors.textMuted, fontSize: 12 },
   moreBtn: { padding: 4 },
-  caption: { color: Colors.textPrimary, fontSize: 15, lineHeight: 21, paddingHorizontal: 14, paddingBottom: 12 },
-  media: { width: '100%', aspectRatio: 4 / 3 },
+  caption: { color: Colors.textPrimary, fontSize: 15, lineHeight: 21, paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8 },
+  media: { width: W, height: W * 0.75 },
+  counter: { position: 'absolute', top: 10, right: 10, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)' },
+  counterText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  dots: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 },
+  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  dotActive: { backgroundColor: '#fff', width: 14 },
   footer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 14 },
   statGroup: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   statText: { color: Colors.textSecondary, fontSize: 13, fontWeight: '600' },
@@ -247,21 +311,27 @@ function PostsGrid({ userId, user }: { userId: string; user: any }) {
   const toggle = (type: 'photo' | 'video') =>
     setFilter(f => (f === type ? 'all' : type));
 
+  // Filter posts that contain ANY item matching the type — handles mixed multi-media posts
   const filtered = (posts || []).filter((p: any) => {
-    if (filter === 'all') return true;
-    if (filter === 'photo') return p.media_type === 'photo' && p.media_urls?.length > 0;
-    if (filter === 'video') return p.media_type === 'video' && p.media_urls?.length > 0;
-    return true;
+    if (filter === 'all') return (p.media_urls?.length ?? 0) > 0 || p.caption;
+    const types = getPostMediaTypes(p);
+    return types.some(t => t === filter);
   });
 
-  // For the gallery view, build a MediaItem list of just the URLs
-  const galleryItems: MediaItem[] = filtered
-    .filter((p: any) => p.media_urls?.[0])
-    .map((p: any) => ({
-      id: p.id,
-      url: p.media_urls[0],
-      type: (p.media_type === 'video' ? 'video' : 'photo') as 'video' | 'photo',
-    }));
+  // Flatten gallery view: one cell per matching media item across all posts.
+  // Multi-media posts can contribute multiple cells; each cell uses a composite key.
+  const galleryItems: MediaItem[] = (posts || []).flatMap((p: any) => {
+    const urls: string[] = p.media_urls || [];
+    const types = getPostMediaTypes(p);
+    return urls
+      .map((url, i) => ({ url, type: types[i], postId: p.id, idx: i }))
+      .filter(item => filter === 'all' ? true : item.type === filter)
+      .map(item => ({
+        id: `${item.postId}-${item.idx}`,
+        url: item.url,
+        type: item.type as 'video' | 'photo',
+      }));
+  });
 
   const openViewer = (idx: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -356,9 +426,12 @@ function PostsGrid({ userId, user }: { userId: string; user: any }) {
           ))}
         </View>
       ) : (
-        <View style={{ paddingTop: 8 }}>
-          {filtered.map((post: any) => (
-            <MyPostCard key={post.id} post={post} user={user} />
+        <View>
+          {filtered.map((post: any, i: number) => (
+            <React.Fragment key={post.id}>
+              {i > 0 ? <View style={mf.feedSeparator} /> : null}
+              <MyPostCard post={post} user={user} />
+            </React.Fragment>
           ))}
         </View>
       )}
@@ -415,6 +488,8 @@ const mf = StyleSheet.create({
   videoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' },
   videoIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.5)' },
   videoCornerTag: { position: 'absolute', top: 6, right: 6, paddingHorizontal: 5, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.6)' },
+  // Thin divider between full-width feed posts — matches home feed
+  feedSeparator: { height: 8, backgroundColor: Colors.separator },
 });
 
 function InfoTab({ user }: { user: any }) {
@@ -943,6 +1018,7 @@ export default function ProfileScreen() {
     showSheet({
       title: 'Settings',
       options: [
+        { label: 'Edit Profile', onPress: () => setEditVisible(true) },
         { label: 'Privacy Settings', onPress: () => showSheet({ title: 'Privacy', message: 'Control who can see your profile and contact you.', options: [{ label: 'OK' }] }) },
         { label: 'Notification Settings', onPress: () => showSheet({ title: 'Notifications', message: 'Manage your push notification preferences.', options: [{ label: 'OK' }] }) },
         { label: 'Help & Support', onPress: () => showSheet({ title: 'Support', message: 'Email: support@dateafilipina.app', options: [{ label: 'OK' }] }) },
@@ -969,8 +1045,11 @@ export default function ProfileScreen() {
           />
           <SafeAreaView edges={['top']}>
             <View style={s.topBar}>
-              <Text style={s.topTitle}>My Profile</Text>
+              <View style={{ flex: 1 }} />
               <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={s.topBtn} onPress={handleShare}>
+                  <Ionicons name="share-social-outline" size={19} color="#fff" />
+                </TouchableOpacity>
                 <TouchableOpacity style={s.topBtn} onPress={handleSettings}>
                   <Ionicons name="settings-outline" size={19} color="#fff" />
                 </TouchableOpacity>
@@ -1019,23 +1098,6 @@ export default function ProfileScreen() {
               ? <Text style={s.userBio}>{user.bio}</Text>
               : <TouchableOpacity onPress={() => setEditVisible(true)}><Text style={s.addBio}>+ Add a bio</Text></TouchableOpacity>
             }
-          </View>
-
-          <TouchableOpacity style={s.coinPill} onPress={() => setActiveTab('wallet')}>
-            <LinearGradient colors={['rgba(214,26,78,0.25)', 'rgba(214,26,78,0.08)']} style={s.coinPillInner}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Ionicons name="diamond" size={14} color="#FFD700" />
-                <Text style={s.coinPillText}>{coins.toLocaleString()} coins</Text>
-              </View>
-              <Text style={s.coinPillAdd}>Tap to buy +</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <View style={s.actionRow}>
-            <GradientButton title="Edit Profile" onPress={() => setEditVisible(true)} style={{ flex: 1 }} size="sm" />
-            <TouchableOpacity style={s.iconBtn} onPress={handleShare}>
-              <Ionicons name="share-social-outline" size={19} color={Colors.textSecondary} />
-            </TouchableOpacity>
           </View>
 
           <TabBar active={activeTab} onChange={setActiveTab} />

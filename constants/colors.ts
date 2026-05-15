@@ -19,10 +19,13 @@ export const Colors = {
   separator: 'rgba(255,255,255,0.06)',
 } as const;
 
+// LinearGradient (expo-linear-gradient) requires a readonly tuple with at least
+// two color stops. `as const` preserves the literal tuple shape required by the
+// `[ColorValue, ColorValue, ...ColorValue[]]` type, instead of widening to string[].
 export const Gradients = {
-  primary: ['#5A0A1E', '#8A0F2A', '#D61A4E', '#FF3D6E'] as string[],
-  primaryReverse: ['#FF3D6E', '#D61A4E', '#8A0F2A', '#5A0A1E'] as string[],
-  card: ['#1A1A22', '#12121A'] as string[],
-  overlay: ['transparent', 'rgba(15,15,20,0.95)'] as string[],
-  liveOverlay: ['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)'] as string[],
+  primary: ['#5A0A1E', '#8A0F2A', '#D61A4E', '#FF3D6E'],
+  primaryReverse: ['#FF3D6E', '#D61A4E', '#8A0F2A', '#5A0A1E'],
+  card: ['#1A1A22', '#12121A'],
+  overlay: ['transparent', 'rgba(15,15,20,0.95)'],
+  liveOverlay: ['rgba(0,0,0,0)', 'rgba(0,0,0,0.7)'],
 } as const;

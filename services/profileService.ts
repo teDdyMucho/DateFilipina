@@ -162,6 +162,36 @@ export const profileService = {
     return data || [];
   },
 
+  /**
+   * Get a list of users to show as "friends" / story circles on the home page.
+   * Online first, then most recently seen — excludes self, admins, banned.
+   */
+  async getFriendsForStories(currentUserId: string, limit = 20): Promise<Array<{ id: string; name: string; avatar: string; isOnline: boolean; isLive: boolean }>> {
+    let query = supabase
+      .from('profiles')
+      .select('id, name, avatar_url, is_online, is_live, last_seen_at')
+      .neq('id', currentUserId)
+      .order('is_online', { ascending: false })
+      .order('is_live', { ascending: false })
+      .order('last_seen_at', { ascending: false })
+      .limit(limit);
+
+    // Defensive: skip admins/banned if the columns exist; ignore if they don't
+    try {
+      query = query.neq('is_admin', true).neq('is_banned', true);
+    } catch {}
+
+    const { data, error } = await query;
+    if (error) return [];
+    return (data || []).map((p: any) => ({
+      id: p.id,
+      name: p.name || 'User',
+      avatar: fixAvatarUri(p.avatar_url, p.id),
+      isOnline: p.is_online || false,
+      isLive: p.is_live || false,
+    }));
+  },
+
   async addCoins(userId: string, amount: number, description: string) {
     const { error } = await supabase
       .from('profiles')

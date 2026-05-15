@@ -786,7 +786,7 @@ export default function LiveScreen() {
         </View>
 
         {/* Categories */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.cats}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.catsScroll} contentContainerStyle={styles.cats}>
           {CATEGORIES.map(cat => {
             const active = activeCategory === cat;
             return (
@@ -861,16 +861,17 @@ export default function LiveScreen() {
 const styles = StyleSheet.create({
   bgGradient: { position: 'absolute', top: 0, left: 0, right: 0, height: 300 },
 
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 0, paddingBottom: 4 },
   headerTitle: { fontSize: 32, fontWeight: '900', color: Colors.textPrimary, letterSpacing: -0.8 },
   headerSub: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   headerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FF3B30' },
   headerSubText: { color: Colors.textMuted, fontSize: 12, fontWeight: '600' },
   goLiveHeaderBtn: { borderRadius: 22, overflow: 'hidden', shadowColor: '#FF3D6E', shadowOpacity: 0.4, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 6 },
-  goLiveHeaderGrad: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 10 },
+  goLiveHeaderGrad: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7 },
   goLiveHeaderText: { color: '#fff', fontWeight: '800', fontSize: 14 },
 
-  cats: { paddingHorizontal: 16, gap: 8, paddingBottom: 14, alignItems: 'center' },
+  catsScroll: { marginTop: 12, flexGrow: 0 },
+  cats: { paddingHorizontal: 16, gap: 8, paddingTop: 0, paddingBottom: 6, alignItems: 'center' },
   catPill: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     paddingHorizontal: 14, paddingVertical: 9,

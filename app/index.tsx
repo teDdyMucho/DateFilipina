@@ -9,7 +9,7 @@ const { width, height } = Dimensions.get('window');
 
 export default function SplashIndex() {
   const router = useRouter();
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, hasHydrated } = useAuthStore();
 
   const logoScale = useRef(new Animated.Value(0.3)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
@@ -30,16 +30,22 @@ export default function SplashIndex() {
       Animated.timing(taglineOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
     ]).start();
 
+    return () => {};
+  }, []);
+
+  // Wait for the persisted auth store to hydrate before deciding where to go.
+  // Without this, isAuthenticated is always false on the first render → flash to login.
+  useEffect(() => {
+    if (!hasHydrated) return;
     const timer = setTimeout(() => {
       if (isAuthenticated) {
         router.replace(user?.isAdmin ? '/admin' : '/(tabs)/home');
       } else {
         router.replace('/auth/login');
       }
-    }, 2400);
-
+    }, 800);
     return () => clearTimeout(timer);
-  }, []);
+  }, [hasHydrated, isAuthenticated, user?.isAdmin]);
 
   return (
     <View style={styles.container}>

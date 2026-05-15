@@ -7,17 +7,19 @@ import { Colors } from '@/constants/colors';
 export type ActionSheetOption = {
   label: string;
   style?: 'default' | 'destructive' | 'cancel';
+  destructive?: boolean;
   onPress?: () => void;
 };
 
 type Props = {
   visible: boolean;
   title?: string;
+  message?: string;
   options: ActionSheetOption[];
   onClose: () => void;
 };
 
-export function ActionSheet({ visible, title, options, onClose }: Props) {
+export function ActionSheet({ visible, title, message, options, onClose }: Props) {
   const normalOptions = options.filter(o => o.style !== 'cancel');
   const cancelOption = options.find(o => o.style === 'cancel');
 
@@ -36,30 +38,34 @@ export function ActionSheet({ visible, title, options, onClose }: Props) {
 
         {/* Bottom sheet */}
         <View style={st.sheet}>
-          {title ? (
+          {title || message ? (
             <View style={st.titleRow}>
-              <Text style={st.title}>{title}</Text>
+              {title ? <Text style={st.title}>{title}</Text> : null}
+              {message ? <Text style={st.message}>{message}</Text> : null}
             </View>
           ) : null}
 
           <View style={st.group}>
-            {normalOptions.map((opt, i) => (
-              <React.Fragment key={i}>
-                {i > 0 ? <View style={st.sep} /> : null}
-                <TouchableOpacity
-                  style={st.option}
-                  activeOpacity={0.6}
-                  onPress={() => {
-                    onClose();
-                    setTimeout(() => opt.onPress?.(), 50);
-                  }}
-                >
-                  <Text style={[st.optText, opt.style === 'destructive' && st.destructive]}>
-                    {opt.label}
-                  </Text>
-                </TouchableOpacity>
-              </React.Fragment>
-            ))}
+            {normalOptions.map((opt, i) => {
+              const isDestructive = opt.style === 'destructive' || opt.destructive === true;
+              return (
+                <React.Fragment key={i}>
+                  {i > 0 ? <View style={st.sep} /> : null}
+                  <TouchableOpacity
+                    style={st.option}
+                    activeOpacity={0.6}
+                    onPress={() => {
+                      onClose();
+                      setTimeout(() => opt.onPress?.(), 50);
+                    }}
+                  >
+                    <Text style={[st.optText, isDestructive && st.destructive]}>
+                      {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                </React.Fragment>
+              );
+            })}
           </View>
 
           {cancelOption ? (
@@ -99,6 +105,14 @@ const st = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     letterSpacing: 0.3,
+  },
+  message: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '400',
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 19,
   },
   group: {
     backgroundColor: Colors.card,

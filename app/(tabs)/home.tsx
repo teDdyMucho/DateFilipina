@@ -3,11 +3,10 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ScrollView,
   Dimensions, RefreshControl, Animated, Alert, Share, Modal,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar,
-  PanResponder,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
+import { Video, ResizeMode, Audio } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useScrollToTop } from '@react-navigation/native';
@@ -15,11 +14,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useFeed, useLikePost, useCreatePost, useDeletePost, useUpdatePost, useComments, useAddComment, useShareToFeed } from '@/hooks/useFeed';
+import { useFriendsForStories } from '@/hooks/useProfile';
 import { ActionSheet, ActionSheetOption } from '@/components/ActionSheet';
 import { ReportSheet } from '@/components/ReportSheet';
 import { useSheet } from '@/components/GlobalActionSheet';
 import { messageService } from '@/services/messageService';
 import { AvatarWithRing } from '@/components/AvatarWithRing';
+import { VideoPlayer } from '@/components/VideoPlayer';
 import { fixAvatarUri } from '@/constants/avatarUtils';
 import { Colors, Gradients } from '@/constants/colors';
 import { FeedPost } from '@/constants/types';
@@ -123,57 +124,77 @@ function CommentsModal({ visible, postId, onClose }: { visible: boolean; postId:
 
 // ─── Create Post Modal ────────────────────────────────────────────────────────
 
+interface MediaPick { uri: string; type: 'photo' | 'video' }
+
 function CreatePostModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const [mediaUri, setMediaUri] = useState<string | null>(null);
-  const [mediaType, setMediaType] = useState<'photo' | 'video'>('photo');
+  const [media, setMedia] = useState<MediaPick[]>([]);
   const [caption, setCaption] = useState('');
   const { mutateAsync: createPost, isPending } = useCreatePost();
   const { user } = useAuthStore();
   const showSheet = useSheet();
 
-  const pick = async (type: 'photo' | 'video', source: 'camera' | 'library') => {
+  const MAX_MEDIA = 10;
+
+  const pick = async (source: 'camera' | 'library') => {
     if (source === 'camera') {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') { showSheet({ title: 'Permission needed', message: 'Allow camera access in settings.', options: [{ label: 'OK' }] }); return; }
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: type === 'video' ? ImagePicker.MediaTypeOptions.Videos : ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
         allowsEditing: true, quality: 0.85, videoMaxDuration: 60,
       });
-      if (!result.canceled) { setMediaUri(result.assets[0].uri); setMediaType(type); }
+      if (!result.canceled && result.assets[0]) {
+        const a = result.assets[0];
+        const item: MediaPick = { uri: a.uri, type: a.type === 'video' ? 'video' : 'photo' };
+        setMedia(m => [...m, item].slice(0, MAX_MEDIA));
+      }
     } else {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') { showSheet({ title: 'Permission needed', message: 'Allow photo library access in settings.', options: [{ label: 'OK' }] }); return; }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
-        allowsEditing: true, quality: 0.85, videoMaxDuration: 60,
+        allowsMultipleSelection: true,
+        selectionLimit: MAX_MEDIA,
+        quality: 0.85,
+        videoMaxDuration: 60,
       });
       if (!result.canceled) {
-        setMediaUri(result.assets[0].uri);
-        setMediaType(result.assets[0].type === 'video' ? 'video' : 'photo');
+        const additions: MediaPick[] = result.assets.map(a => ({
+          uri: a.uri,
+          type: a.type === 'video' ? 'video' : 'photo',
+        }));
+        setMedia(m => [...m, ...additions].slice(0, MAX_MEDIA));
       }
     }
   };
 
-  const handlePickMedia = (type: 'photo' | 'video') => {
+  const handlePickMedia = () => {
+    if (media.length >= MAX_MEDIA) {
+      showSheet({ title: 'Limit reached', message: `You can attach up to ${MAX_MEDIA} items per post.`, options: [{ label: 'OK' }] });
+      return;
+    }
     showSheet({
-      title: type === 'video' ? 'Select Video' : 'Select Photo',
+      title: 'Add Media',
       options: [
-        { label: 'Camera', onPress: () => pick(type, 'camera') },
-        { label: 'Photo Library', onPress: () => pick(type, 'library') },
+        { label: 'Camera', onPress: () => pick('camera') },
+        { label: 'Photo / Video Library', onPress: () => pick('library') },
         { label: 'Cancel', style: 'cancel' },
       ],
     });
   };
 
+  const handleRemove = (idx: number) => {
+    setMedia(m => m.filter((_, i) => i !== idx));
+  };
+
   const handlePost = async () => {
-    // Allow text-only posts (no media required)
-    if (!mediaUri && !caption.trim()) {
+    if (media.length === 0 && !caption.trim()) {
       showSheet({ title: 'Nothing to post', message: 'Please add a photo, video, or write something.', options: [{ label: 'OK' }] });
       return;
     }
     try {
-      await createPost({ uri: mediaUri, mediaType, caption: caption.trim() });
-      setMediaUri(null); setCaption('');
+      await createPost({ media, caption: caption.trim() });
+      setMedia([]); setCaption('');
       onClose();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e: any) {
@@ -183,11 +204,11 @@ function CreatePostModal({ visible, onClose }: { visible: boolean; onClose: () =
 
   const handleClose = () => {
     if (isPending) return;
-    setMediaUri(null); setCaption('');
+    setMedia([]); setCaption('');
     onClose();
   };
 
-  const canPost = !isPending && (!!mediaUri || !!caption.trim());
+  const canPost = !isPending && (media.length > 0 || !!caption.trim());
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={handleClose}>
@@ -226,46 +247,43 @@ function CreatePostModal({ visible, onClose }: { visible: boolean; onClose: () =
             </View>
             <Text style={pm.charCount}>{caption.length}/300</Text>
 
-            {/* Media preview */}
-            {mediaUri ? (
-              <View style={pm.previewArea}>
-                {mediaType === 'video'
-                  ? <Video
-                      source={{ uri: mediaUri }}
-                      style={pm.preview}
-                      useNativeControls
-                      resizeMode={ResizeMode.COVER}
-                      shouldPlay={false}
-                    />
-                  : <Image source={{ uri: mediaUri }} style={pm.preview} contentFit="cover" />
-                }
-                <View style={pm.previewOverlay}>
-                  <TouchableOpacity style={pm.changeBtn} onPress={() => handlePickMedia(mediaType)}>
-                    <Text style={pm.changeBtnText}>✏️ Change</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[pm.changeBtn, { backgroundColor: 'rgba(255,60,60,0.7)' }]} onPress={() => setMediaUri(null)}>
-                    <Text style={pm.changeBtnText}>✕ Remove</Text>
-                  </TouchableOpacity>
-                </View>
-                {mediaType === 'video' && (
-                  <View style={pm.videoBadge}>
-                    <Ionicons name="videocam" size={12} color="#fff" />
-                    <Text style={pm.videoBadgeText}>VIDEO</Text>
+            {/* Media thumbnail strip (horizontal) — supports multi-item, photos + videos */}
+            {media.length > 0 ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={pm.thumbStrip}>
+                {media.map((m, i) => (
+                  <View key={`${m.uri}-${i}`} style={pm.thumbWrap}>
+                    {m.type === 'video' ? (
+                      <View style={pm.thumb}>
+                        <Video source={{ uri: m.uri }} style={pm.thumbImg} resizeMode={ResizeMode.COVER} shouldPlay={false} isMuted positionMillis={500} />
+                        <View style={pm.thumbVideoOverlay}>
+                          <Ionicons name="play" size={20} color="#fff" />
+                        </View>
+                      </View>
+                    ) : (
+                      <Image source={{ uri: m.uri }} style={pm.thumbImg} contentFit="cover" />
+                    )}
+                    <TouchableOpacity style={pm.thumbRemove} onPress={() => handleRemove(i)}>
+                      <Ionicons name="close" size={14} color="#fff" />
+                    </TouchableOpacity>
+                    <View style={pm.thumbIndex}>
+                      <Text style={pm.thumbIndexText}>{i + 1}</Text>
+                    </View>
                   </View>
+                ))}
+                {media.length < MAX_MEDIA && (
+                  <TouchableOpacity style={pm.thumbAdd} onPress={handlePickMedia}>
+                    <Ionicons name="add" size={28} color={Colors.primary} />
+                    <Text style={pm.thumbAddText}>Add</Text>
+                  </TouchableOpacity>
                 )}
-              </View>
+              </ScrollView>
             ) : null}
 
-            {/* Media pick buttons */}
+            {/* Media pick button — single entry, supports multi-select */}
             <View style={pm.mediaRow}>
-              <TouchableOpacity style={pm.mediaBtn} onPress={() => handlePickMedia('photo')}>
-                <Ionicons name="camera-outline" size={24} color={Colors.primary} />
-                <Text style={pm.mediaLabel}>Photo</Text>
-              </TouchableOpacity>
-              <View style={pm.mediaDivider} />
-              <TouchableOpacity style={pm.mediaBtn} onPress={() => handlePickMedia('video')}>
-                <Ionicons name="videocam-outline" size={24} color={Colors.primary} />
-                <Text style={pm.mediaLabel}>Video</Text>
+              <TouchableOpacity style={pm.mediaBtn} onPress={handlePickMedia}>
+                <Ionicons name="images-outline" size={22} color={Colors.primary} />
+                <Text style={pm.mediaLabel}>{media.length === 0 ? 'Add Photos / Videos' : `${media.length} added · add more`}</Text>
               </TouchableOpacity>
             </View>
 
@@ -305,238 +323,82 @@ function HeartBurst({ visible }: { visible: boolean }) {
   );
 }
 
-// ─── Video Fullscreen Modal ───────────────────────────────────────────────────
-
-function VideoFullscreenModal({ uri, visible, onClose }: { uri: string; visible: boolean; onClose: () => void }) {
-  return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
-      <View style={{ flex: 1, backgroundColor: '#000', justifyContent: 'center' }}>
-        <Video
-          source={{ uri }}
-          style={{ width: SW, height: SW * 0.5625 }}
-          resizeMode={ResizeMode.CONTAIN}
-          shouldPlay
-          useNativeControls
-        />
-        <TouchableOpacity
-          onPress={onClose}
-          style={{ position: 'absolute', top: 52, right: 18, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 22, paddingHorizontal: 16, paddingVertical: 9, borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)' }}
-        >
-          <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700', letterSpacing: 0.3 }}>✕  Close</Text>
-        </TouchableOpacity>
-      </View>
-    </Modal>
-  );
-}
-
-// ─── Video Player ─────────────────────────────────────────────────────────────
-
-function VideoPlayer({ uri, isVisible = true }: { uri: string; isVisible?: boolean }) {
-  const [playing, setPlaying] = useState(false);
-  const [ended, setEnded] = useState(false);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [showControls, setShowControls] = useState(false);
-  const [showFullscreen, setShowFullscreen] = useState(false);
-  const [isScrubbing, setIsScrubbing] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const videoRef = useRef<Video>(null);
-  const scrubBarWidth = useRef(1);
-  const controlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!isVisible) {
-      setTimeout(() => {
-        videoRef.current?.pauseAsync().catch(() => {});
-      }, 0);
-      setPlaying(false);
-    }
-  }, [isVisible]);
-
-  const fmtTime = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-  };
-
-  const progress = duration > 0 ? position / duration : 0;
-
-  const resetControlsTimer = () => {
-    if (controlsTimer.current) clearTimeout(controlsTimer.current);
-    setShowControls(true);
-    controlsTimer.current = setTimeout(() => {
-      if (playing && !isScrubbing) setShowControls(false);
-    }, 3000);
-  };
-
-  const handlePlayPause = async () => {
-    if (ended) {
-      await videoRef.current?.setPositionAsync(0);
-      await videoRef.current?.playAsync();
-      setEnded(false); setPlaying(true);
-      // hide centre button after short delay
-      if (controlsTimer.current) clearTimeout(controlsTimer.current);
-      controlsTimer.current = setTimeout(() => setShowControls(false), 800);
-    } else if (playing) {
-      // Briefly flash ⏸ in centre to confirm tap, then pause
-      setShowControls(true);
-      if (controlsTimer.current) clearTimeout(controlsTimer.current);
-      await videoRef.current?.pauseAsync();
-      // setPlaying will be updated by onPlaybackStatusUpdate
-      // After 700ms hide the centre ⏸ — video is now paused so ▶ takes over
-      controlsTimer.current = setTimeout(() => setShowControls(false), 700);
-    } else {
-      await videoRef.current?.playAsync();
-      // setPlaying updated by callback; hide controls after delay
-      if (controlsTimer.current) clearTimeout(controlsTimer.current);
-      controlsTimer.current = setTimeout(() => setShowControls(false), 800);
-    }
-  };
-
-  const seekTo = async (x: number) => {
-    const pct = Math.max(0, Math.min(1, x / scrubBarWidth.current));
-    const newPos = Math.round(pct * duration);
-    setPosition(newPos);
-    await videoRef.current?.setPositionAsync(newPos);
-    if (ended) setEnded(false);
-  };
-
-  const scrubPanResponder = useRef(PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: async (e) => {
-      setIsScrubbing(true);
-      setShowControls(true);
-      if (controlsTimer.current) clearTimeout(controlsTimer.current);
-      await videoRef.current?.pauseAsync();
-      seekTo(e.nativeEvent.locationX);
-    },
-    onPanResponderMove: (e) => seekTo(e.nativeEvent.locationX),
-    onPanResponderRelease: async (e) => {
-      await seekTo(e.nativeEvent.locationX);
-      await videoRef.current?.playAsync();
-      setPlaying(true);
-      setIsScrubbing(false);
-      resetControlsTimer();
-    },
-  })).current;
-
-  return (
-    <View style={s.videoWrapper}>
-      <Video
-        ref={videoRef}
-        source={{ uri }}
-        style={s.postImage}
-        resizeMode={ResizeMode.COVER}
-        shouldPlay={false}
-        isMuted={isMuted}
-        onPlaybackStatusUpdate={(status: AVPlaybackStatus) => {
-          if (!status.isLoaded || isScrubbing) return;
-          setPlaying(status.isPlaying);
-          setPosition(status.positionMillis ?? 0);
-          if (status.durationMillis) setDuration(status.durationMillis);
-          if (status.didJustFinish) {
-            setEnded(true); setPlaying(false); setShowControls(true);
-            if (controlsTimer.current) clearTimeout(controlsTimer.current);
-          }
-        }}
-      />
-
-      {/* Tap overlay */}
-      <TouchableOpacity
-        style={StyleSheet.absoluteFill}
-        activeOpacity={1}
-        onPress={handlePlayPause}
-      />
-
-
-      {/* Centre button */}
-      {(!playing && !ended) && (
-        <View pointerEvents="none" style={s.centreBtn}>
-          <View style={s.centreBtnInner}>
-            <Ionicons name="play" size={28} color="#fff" />
-          </View>
-        </View>
-      )}
-      {ended && (
-        <View pointerEvents="none" style={s.centreBtn}>
-          <View style={s.centreBtnInner}>
-            <Ionicons name="refresh" size={28} color="#fff" />
-          </View>
-        </View>
-      )}
-      {playing && showControls && (
-        <View pointerEvents="none" style={s.centreBtn}>
-          <View style={s.centreBtnInner}>
-            <Ionicons name="pause" size={28} color="#fff" />
-          </View>
-        </View>
-      )}
-
-      {/* Bottom control bar — always show when paused/ended, fade when playing */}
-      {(showControls || !playing || ended) && (
-        <View style={s.videoBar}>
-          {/* Play/pause */}
-          <TouchableOpacity onPress={handlePlayPause} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Ionicons name={ended ? 'refresh' : playing ? 'pause' : 'play'} size={16} color="#fff" />
-          </TouchableOpacity>
-
-          {/* Time elapsed */}
-          <Text style={s.barTime}>{fmtTime(position)}</Text>
-
-          {/* Scrub track */}
-          <View
-            style={s.scrubTrack}
-            onLayout={e => { scrubBarWidth.current = Math.max(1, e.nativeEvent.layout.width); }}
-            {...scrubPanResponder.panHandlers}
-          >
-            {/* Background rail */}
-            <View style={s.scrubRail} />
-            {/* Filled portion */}
-            <View style={[s.scrubFill, { width: `${progress * 100}%` as any }]} />
-            {/* Thumb */}
-            <View style={[s.scrubThumb, { left: `${progress * 100}%` as any }]} />
-          </View>
-
-          {/* Duration */}
-          <Text style={s.barTime}>{fmtTime(duration)}</Text>
-
-          {/* Mute */}
-          <TouchableOpacity
-            onPress={() => { setIsMuted(m => !m); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name={isMuted ? 'volume-mute' : 'volume-high'} size={16} color="#fff" />
-          </TouchableOpacity>
-
-          {/* Fullscreen */}
-          <TouchableOpacity
-            onPress={() => setShowFullscreen(true)}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            style={s.fullscreenIcon}
-          >
-            <Ionicons name="expand" size={16} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      <VideoFullscreenModal uri={uri} visible={showFullscreen} onClose={() => setShowFullscreen(false)} />
-    </View>
-  );
-}
-
 // ─── Post Media (image or video) ──────────────────────────────────────────────
 
-function PostMedia({ post, isVisible = true }: { post: FeedPost & { mediaType?: string }; isVisible?: boolean }) {
-  if (!post.imageUrl) return null;
-
-  if ((post as any).mediaType === 'video') {
-    return <VideoPlayer uri={post.imageUrl} isVisible={isVisible} />;
+// Reuse the proven VideoPlayer for video slides — same behavior as single-video posts.
+// Photo slides are lightweight.
+const MediaSlide = React.memo(function MediaSlide({ url, type, isActive }: { url: string; type: 'photo' | 'video'; isActive: boolean }) {
+  if (type === 'video') {
+    return <VideoPlayer uri={url} isVisible={isActive} />;
   }
-
   return (
     <View style={s.imageWrapper}>
-      <Image source={{ uri: post.imageUrl }} style={s.postImage} contentFit="cover" transition={400} />
+      <Image source={{ uri: url }} style={s.postImage} contentFit="cover" cachePolicy="memory-disk" />
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.25)']} style={s.imageGrad} />
+    </View>
+  );
+});
+
+function PostMedia({ post, isVisible = true }: { post: FeedPost & { mediaType?: string; mediaUrls?: string[]; mediaTypes?: Array<'photo' | 'video'> }; isVisible?: boolean }) {
+  const urls = (post.mediaUrls && post.mediaUrls.length > 0) ? post.mediaUrls : (post.imageUrl ? [post.imageUrl] : []);
+  if (urls.length === 0) return null;
+  const types: Array<'photo' | 'video'> = post.mediaTypes && post.mediaTypes.length === urls.length
+    ? post.mediaTypes
+    : urls.map(() => ((post as any).mediaType === 'video' ? 'video' : 'photo'));
+
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  // Single-item: full-featured player for videos
+  if (urls.length === 1) {
+    return types[0] === 'video'
+      ? <VideoPlayer uri={urls[0]} isVisible={isVisible} />
+      : (
+        <View style={s.imageWrapper}>
+          <Image source={{ uri: urls[0] }} style={s.postImage} contentFit="cover" cachePolicy="memory-disk" />
+          <LinearGradient colors={['transparent', 'rgba(0,0,0,0.25)']} style={s.imageGrad} />
+        </View>
+      );
+  }
+
+  // Multi-item: horizontal swipable pager.
+  // Note: do NOT wrap each slide in Animated.View with native-driver transforms —
+  // on Android that breaks touch hit-testing, so video play buttons inside
+  // can't be tapped. Plain View wrappers keep gestures working.
+  const onMomentumScrollEnd = (e: any) => {
+    const i = Math.round(e.nativeEvent.contentOffset.x / SW);
+    if (i !== activeIndex) {
+      Haptics.selectionAsync();
+      setActiveIndex(i);
+    }
+  };
+
+  return (
+    <View style={{ width: SW }}>
+      <ScrollView
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={onMomentumScrollEnd}
+        bounces={false}
+        overScrollMode="never"
+        decelerationRate="fast"
+      >
+        {urls.map((url, index) => (
+          <View key={`${url}-${index}`} style={{ width: SW }}>
+            <MediaSlide url={url} type={types[index]} isActive={isVisible && index === activeIndex} />
+          </View>
+        ))}
+      </ScrollView>
+      {/* Counter pill */}
+      <View style={s.mediaCounter} pointerEvents="none">
+        <Text style={s.mediaCounterText}>{activeIndex + 1}/{urls.length}</Text>
+      </View>
+      {/* Dots indicator */}
+      <View style={s.mediaDots} pointerEvents="none">
+        {urls.map((_, i) => (
+          <View key={i} style={[s.mediaDot, i === activeIndex && s.mediaDotActive]} />
+        ))}
+      </View>
     </View>
   );
 }
@@ -703,7 +565,9 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
       {/* Media */}
       {!!post.imageUrl && (
         <View style={{ position: 'relative' }}>
-          {(post as any).mediaType === 'video' ? (
+          {/* Multi-item posts need raw touch passthrough so the horizontal swipe works.
+              Videos handle their own gestures. Single photos get the double-tap-to-like wrapper. */}
+          {((post as any).mediaUrls?.length ?? 1) > 1 || (post as any).mediaType === 'video' ? (
             <PostMedia post={post} isVisible={isVisible} />
           ) : (
             <TouchableOpacity activeOpacity={1} onPress={handleDoubleTap}>
@@ -798,6 +662,82 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
   );
 }
 
+// ─── Friends story strip ─────────────────────────────────────────────────────
+
+function FriendsStrip({ onCreatePost }: { onCreatePost: () => void }) {
+  const router = useRouter();
+  const { user } = useAuthStore();
+  const { data: friends = [] } = useFriendsForStories();
+
+  return (
+    <View style={fs.wrap}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={fs.row}
+      >
+        {/* Self avatar — tap to create a post */}
+        <TouchableOpacity
+          style={fs.item}
+          activeOpacity={0.8}
+          onPress={onCreatePost}
+        >
+          <View style={fs.selfRing}>
+            <Image source={{ uri: user?.avatar || '' }} style={fs.avatar} contentFit="cover" />
+            <View style={fs.plusBadge}>
+              <Ionicons name="add" size={13} color="#fff" />
+            </View>
+          </View>
+          <Text style={fs.label} numberOfLines={1}>You</Text>
+        </TouchableOpacity>
+
+        {friends.map((f: any) => (
+          <TouchableOpacity
+            key={f.id}
+            style={fs.item}
+            activeOpacity={0.8}
+            onPress={() => router.push({ pathname: '/user/[id]', params: { id: f.id } } as any)}
+          >
+            <LinearGradient
+              colors={f.isLive
+                ? ['#FF3B30', '#FF9F0A']
+                : f.isOnline
+                  ? ['#FF3D6E', '#BF5AF2', '#5E5CE6']
+                  : ['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
+              style={fs.ring}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            >
+              <View style={fs.ringInner}>
+                <Image source={{ uri: f.avatar }} style={fs.avatar} contentFit="cover" />
+              </View>
+            </LinearGradient>
+            {f.isLive && (
+              <View style={fs.liveBadge}>
+                <Text style={fs.liveBadgeText}>LIVE</Text>
+              </View>
+            )}
+            <Text style={fs.label} numberOfLines={1}>{f.name}</Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+const fs = StyleSheet.create({
+  wrap: { borderBottomWidth: 1, borderBottomColor: Colors.glassBorder, paddingVertical: 10 },
+  row: { paddingHorizontal: 12, gap: 12, alignItems: 'center' },
+  item: { alignItems: 'center', width: 68, gap: 5 },
+  ring: { width: 64, height: 64, borderRadius: 32, padding: 2.5, alignItems: 'center', justifyContent: 'center' },
+  ringInner: { width: '100%', height: '100%', borderRadius: 30, padding: 2, backgroundColor: Colors.background },
+  selfRing: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.12)', position: 'relative' },
+  avatar: { width: '100%', height: '100%', borderRadius: 30, backgroundColor: '#222' },
+  plusBadge: { position: 'absolute', bottom: -2, right: -2, width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.primary, borderWidth: 2.5, borderColor: Colors.background, alignItems: 'center', justifyContent: 'center' },
+  liveBadge: { position: 'absolute', top: 50, left: '50%', transform: [{ translateX: -16 }], backgroundColor: '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: 2, borderColor: Colors.background },
+  liveBadgeText: { color: '#fff', fontSize: 8, fontWeight: '900', letterSpacing: 0.5 },
+  label: { color: Colors.textSecondary, fontSize: 11, fontWeight: '600', maxWidth: 64, textAlign: 'center' },
+});
+
 // ─── Home Screen ──────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
@@ -812,6 +752,16 @@ export default function HomeScreen() {
   useScrollToTop(listRef);
   const [isFocused, setIsFocused] = useState(true);
   const [visibleIds, setVisibleIds] = useState<Set<string> | null>(null);
+
+  // Configure audio so videos play with sound on Android (default routes audio
+  // through earpiece / honors silent mode and produces no sound).
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+    }).catch(() => {});
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -838,56 +788,14 @@ export default function HomeScreen() {
   const Header = () => (
     <View>
       <LinearGradient colors={[Colors.background, 'transparent']} style={s.topBarGrad}>
-        <View style={s.topBar}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.appTitle}>DateFilipina</Text>
-            <View style={s.subtitleRow}>
-              <View style={s.onlineDot} />
-              <Text style={s.appSubtitle}>Find your match</Text>
-            </View>
-          </View>
-          <View style={s.topRight}>
-            <TouchableOpacity style={s.coinPill} onPress={() => router.push('/(tabs)/profile')} activeOpacity={0.8}>
-              <LinearGradient
-                colors={['rgba(255,215,0,0.18)', 'rgba(255,138,0,0.10)']}
-                style={s.coinPillGrad}
-                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              >
-                <Ionicons name="diamond" size={13} color="#FFD700" />
-                <Text style={s.coinText}>{coins.toLocaleString()}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.iconBtn}
-              activeOpacity={0.7}
-              onPress={() => showSheet({
-                title: 'Notifications',
-                message: 'You\'re all caught up.',
-                options: [{ label: 'OK' }],
-              })}
-            >
-              <Ionicons name="notifications-outline" size={20} color={Colors.textPrimary} />
-            </TouchableOpacity>
-          </View>
+        <View style={s.topBarCentered}>
+          <Text style={s.brandTitle}>DateFilipina</Text>
+          <Text style={s.brandTagline}>Find your match</Text>
         </View>
       </LinearGradient>
 
-      {/* Create post bar */}
-      <TouchableOpacity style={s.createBar} onPress={() => setShowCreate(true)} activeOpacity={0.85}>
-        <AvatarWithRing uri={user?.avatar || ''} size={40} />
-        <View style={s.createBarInput}>
-          <Text style={s.createBarText}>Share a photo, video, or thought...</Text>
-        </View>
-        <LinearGradient colors={Gradients.primary} style={s.createBarIcon} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-          <Ionicons name="add" size={22} color="#fff" />
-        </LinearGradient>
-      </TouchableOpacity>
-
-      <View style={s.sectionRow}>
-        <View style={s.sectionDot} />
-        <Text style={s.sectionTitle}>Latest Posts</Text>
-        <View style={{ flex: 1, height: 1, backgroundColor: Colors.separator, marginLeft: 10 }} />
-      </View>
+      {/* Friends stories row — tap "You" + button to create a post */}
+      <FriendsStrip onCreatePost={() => setShowCreate(true)} />
 
       {isLoading && (
         <View style={s.loadingBox}>
@@ -945,16 +853,19 @@ export default function HomeScreen() {
 
 const s = StyleSheet.create({
   topBarGrad: { paddingBottom: 4 },
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 },
-  appTitle: { fontSize: 26, fontWeight: '900', color: Colors.textPrimary, letterSpacing: -0.8 },
-  subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
-  onlineDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#34C759' },
-  appSubtitle: { fontSize: 11, color: Colors.textMuted, fontWeight: '600' },
-  topRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  coinPill: { borderRadius: 22, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,215,0,0.35)' },
-  coinPillGrad: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7 },
-  coinText: { color: '#FFD700', fontSize: 13, fontWeight: '800' },
-  iconBtn: { width: 40, height: 40, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.04)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  // Centered brand header (no coin/notif buttons)
+  topBarCentered: { alignItems: 'center', justifyContent: 'center', paddingTop: 12, paddingBottom: 10, gap: 2 },
+  brandTitle: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: Colors.textPrimary,
+    letterSpacing: 1.2,
+    fontStyle: 'italic',
+    textShadowColor: 'rgba(214,26,78,0.45)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  brandTagline: { fontSize: 11, color: Colors.textMuted, fontWeight: '600', letterSpacing: 2, textTransform: 'uppercase' },
   createBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, marginBottom: 16, gap: 10, backgroundColor: Colors.card, borderRadius: 18, padding: 12, borderWidth: 1, borderColor: Colors.glassBorder },
   createBarInput: { flex: 1 },
   createBarText: { color: Colors.textMuted, fontSize: 14 },
@@ -991,7 +902,15 @@ const s = StyleSheet.create({
   editSave: { flex: 1, borderRadius: 12, overflow: 'hidden' },
   editSaveGrad: { height: 44, alignItems: 'center', justifyContent: 'center' },
   editSaveText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  // Multi-media pager indicators
+  mediaCounter: { position: 'absolute', top: 10, right: 10, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)' },
+  mediaCounterText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  mediaDots: { position: 'absolute', bottom: 10, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', gap: 4 },
+  mediaDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
+  mediaDotActive: { backgroundColor: '#fff', width: 14 },
   imageWrapper: { position: 'relative' },
+  videoPosterOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.18)' },
+  videoPlayCircle: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(0,0,0,0.55)', borderWidth: 2, borderColor: 'rgba(255,255,255,0.55)', alignItems: 'center', justifyContent: 'center' },
   videoWrapper: { position: 'relative' },
   postImage: { width: SW, height: SW * 0.75 },
   imageGrad: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 60 },
@@ -1043,8 +962,19 @@ const pm = StyleSheet.create({
   changeBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
   videoBadge: { position: 'absolute', top: 12, left: 12, backgroundColor: 'rgba(0,0,0,0.7)', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 },
   videoBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  // Multi-media thumb strip
+  thumbStrip: { paddingHorizontal: 16, paddingVertical: 10, gap: 10, flexDirection: 'row' },
+  thumbWrap: { width: 92, height: 92, borderRadius: 12, overflow: 'hidden', position: 'relative', backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: Colors.glassBorder },
+  thumb: { width: '100%', height: '100%' },
+  thumbImg: { width: '100%', height: '100%' },
+  thumbVideoOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.25)' },
+  thumbRemove: { position: 'absolute', top: 4, right: 4, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center' },
+  thumbIndex: { position: 'absolute', bottom: 4, left: 4, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.7)' },
+  thumbIndexText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+  thumbAdd: { width: 92, height: 92, borderRadius: 12, borderWidth: 1.5, borderColor: Colors.primary, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 2, backgroundColor: 'rgba(214,26,78,0.06)' },
+  thumbAddText: { color: Colors.primary, fontSize: 11, fontWeight: '700' },
   mediaRow: { flexDirection: 'row', marginHorizontal: 16, marginTop: 8, backgroundColor: Colors.card, borderRadius: 16, borderWidth: 1, borderColor: Colors.glassBorder, overflow: 'hidden' },
-  mediaBtn: { flex: 1, alignItems: 'center', paddingVertical: 14, gap: 4 },
+  mediaBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, gap: 8 },
   mediaDivider: { width: 1, backgroundColor: Colors.glassBorder, marginVertical: 10 },
   mediaIcon: { fontSize: 22 },
   mediaLabel: { fontSize: 13, fontWeight: '600', color: Colors.textSecondary },

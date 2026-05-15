@@ -59,12 +59,11 @@ export function useCreatePost() {
   const user = useAuthStore(s => s.user);
 
   return useMutation({
-    mutationFn: async ({ uri, mediaType, caption }: { uri: string | null; mediaType: 'photo' | 'video'; caption: string }) => {
-      let mediaUrl = '';
-      if (uri) {
-        mediaUrl = await feedService.uploadMedia(uri, user!.id, mediaType);
-      }
-      await feedService.createPost(user!.id, mediaUrl, mediaType, caption);
+    mutationFn: async ({ media, caption }: { media: Array<{ uri: string; type: 'photo' | 'video' }>; caption: string }) => {
+      // Upload each item in parallel
+      const urls = await Promise.all(media.map(m => feedService.uploadMedia(m.uri, user!.id, m.type)));
+      const types = media.map(m => m.type);
+      await feedService.createPostMulti(user!.id, urls, types, caption);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['feed', user?.id] });

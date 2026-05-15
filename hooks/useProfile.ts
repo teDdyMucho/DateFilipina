@@ -25,6 +25,16 @@ export function useUserPosts(userId: string) {
   });
 }
 
+export function useFriendsForStories() {
+  const myId = useAuthStore(s => s.user?.id);
+  return useQuery({
+    queryKey: ['friendsForStories', myId],
+    queryFn: () => profileService.getFriendsForStories(myId!, 20),
+    enabled: !!myId,
+    staleTime: 60_000,
+  });
+}
+
 export function useFollowStatus(myId: string, targetId: string) {
   return useQuery({
     queryKey: ['followStatus', myId, targetId],
