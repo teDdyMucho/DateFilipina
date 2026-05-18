@@ -44,6 +44,9 @@ export interface FeedPost {
   likes: number;
   comments: number;
   isLiked: boolean;
+  // Which reaction the current user picked on this post, if any
+  // ('love' | 'wow' | 'hot' | 'sexy' | 'sad' | 'angry').
+  myReaction?: 'love' | 'wow' | 'hot' | 'sexy' | 'sad' | 'angry' | null;
   timestamp: Date;
   sharedFrom?: { userId: string; userName: string; userAvatar: string };
 }
@@ -58,6 +61,9 @@ export interface Message {
   read: boolean;
   imageUrl?: string;
   giftId?: string;
+  // When set, this message is a reply to a My Day story. The chat bubble shows
+  // a thumbnail preview if the story is still active (≤24h, not deleted).
+  replyToStoryId?: string;
 }
 
 export interface Conversation {

@@ -3,6 +3,7 @@ import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, ScrollView,
   Dimensions, RefreshControl, Animated, Alert, Share, Modal,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, StatusBar,
+  Pressable,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
@@ -19,6 +20,10 @@ import { useActiveStories, useCreateStory } from '@/hooks/useStories';
 import { useUnreadCount } from '@/hooks/useNotifications';
 import { StoriesViewer } from '@/components/StoriesViewer';
 import { NotificationsModal } from '@/components/NotificationsModal';
+import { LikersModal } from '@/components/LikersModal';
+import { ReactionPicker } from '@/components/ReactionPicker';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { POST_REACTIONS, PostReactionKey } from '@/services/feedService';
 import { ActionSheet, ActionSheetOption } from '@/components/ActionSheet';
 import { ReportSheet } from '@/components/ReportSheet';
 import { useSheet } from '@/components/GlobalActionSheet';
@@ -417,8 +422,17 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
   const [showHeart, setShowHeart] = useState(false);
   const [bookmarked, setBookmarked] = useState(false);
   const [liked, setLiked] = useState(post.isLiked);
+  const [myReaction, setMyReaction] = useState<PostReactionKey | null>(post.myReaction ?? (post.isLiked ? 'love' : null));
   const [likeCount, setLikeCount] = useState(post.likes);
   const [showComments, setShowComments] = useState(false);
+  const [showLikers, setShowLikers] = useState(false);
+  // Reaction picker anchor + visibility. Default Y is past the middle of the
+  // screen so the popover lands somewhere visible even if measureInWindow
+  // never fires its callback.
+  const screenHeight = Dimensions.get('window').height;
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [pickerAnchor, setPickerAnchor] = useState({ x: Dimensions.get('window').width / 2, y: screenHeight * 0.65 });
+  const likeBtnRef = useRef<View>(null);
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showReport, setShowReport] = useState(false);
@@ -427,12 +441,37 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
   const router = useRouter();
   const isOwn = post.user.id === myId;
 
-  const triggerLike = () => {
+  // Tap heart: toggle love on/off. Long-press: open reaction picker.
+  const applyReaction = (next: PostReactionKey | null) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    likePost({ postId: post.id, isLiked: liked });
-    if (!liked) { setShowHeart(true); setTimeout(() => setShowHeart(false), 800); }
-    setLikeCount(c => liked ? c - 1 : c + 1);
-    setLiked(l => !l);
+    const wasLiked = liked;
+    const willBeLiked = next !== null;
+    // Optimistic local update
+    if (willBeLiked && !wasLiked) {
+      setShowHeart(true);
+      setTimeout(() => setShowHeart(false), 800);
+    }
+    setLikeCount(c => Math.max(0, c + ((willBeLiked ? 1 : 0) - (wasLiked ? 1 : 0))));
+    setLiked(willBeLiked);
+    setMyReaction(next);
+    likePost({ postId: post.id, reaction: next } as any);
+  };
+
+  const triggerLike = () => {
+    applyReaction(liked ? null : 'love');
+  };
+
+  const openReactionPicker = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Open the picker IMMEDIATELY — never depend on measureInWindow firing
+    // (on Android, the callback can silently fail to fire, leaving the picker
+    // invisible). Best-effort measure after for better positioning.
+    setPickerVisible(true);
+    likeBtnRef.current?.measureInWindow?.((x, y, width) => {
+      if (typeof x === 'number' && typeof y === 'number') {
+        setPickerAnchor({ x: x + width / 2, y: y });
+      }
+    });
   };
 
   const handleDoubleTap = () => {
@@ -442,6 +481,9 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
     }
     lastTap.current = now;
   };
+
+  // Look up the active reaction meta for rendering the icon next to the count.
+  const activeReaction = myReaction ? POST_REACTIONS.find(r => r.key === myReaction) : undefined;
 
   const showSheet = useSheet();
   const handleShare = () => {
@@ -601,10 +643,37 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
       {/* Actions */}
       <View style={s.actions}>
         <View style={s.actionsLeft}>
-          <TouchableOpacity style={s.actionBtn} onPress={triggerLike}>
-            <Ionicons name={liked ? 'heart' : 'heart-outline'} size={22} color={liked ? Colors.primary : Colors.textSecondary} />
-            <Text style={[s.actionCount, liked && { color: Colors.primaryLight }]}>{fmtCount(likeCount)}</Text>
-          </TouchableOpacity>
+          {/* Heart icon: tap toggles love, HOLD opens reaction picker.
+              When a reaction is picked, the icon changes to that reaction
+              on this user's view. Tapping the count opens the likers list. */}
+          <View style={s.actionBtn} ref={likeBtnRef as any} collapsable={false}>
+            <Pressable
+              onPress={triggerLike}
+              onLongPress={openReactionPicker}
+              delayLongPress={250}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              android_disableSound={false}
+            >
+              {activeReaction ? (
+                <MaterialCommunityIcons name={activeReaction.icon as any} size={24} color={activeReaction.color} />
+              ) : (
+                <Ionicons name="heart-outline" size={22} color={Colors.textSecondary} />
+              )}
+            </Pressable>
+            <TouchableOpacity
+              onPress={() => { if (likeCount > 0) setShowLikers(true); }}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+              disabled={likeCount === 0}
+            >
+              <Text style={[
+                s.actionCount,
+                activeReaction && { color: activeReaction.color, fontWeight: '700' },
+                likeCount > 0 && { textDecorationLine: 'underline' },
+              ]}>
+                {fmtCount(likeCount)}
+              </Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity style={s.actionBtn} onPress={() => setShowComments(true)}>
             <Ionicons name="chatbubble-outline" size={21} color={Colors.textSecondary} />
             <Text style={s.actionCount}>{fmtCount(post.comments)}</Text>
@@ -619,6 +688,14 @@ function PostCard({ post, myId, isVisible = true }: { post: FeedPost; myId: stri
       </View>
 
       <CommentsModal visible={showComments} postId={post.id} onClose={() => setShowComments(false)} />
+      <LikersModal visible={showLikers} postId={post.id} onClose={() => setShowLikers(false)} />
+      <ReactionPicker
+        visible={pickerVisible}
+        anchorX={pickerAnchor.x}
+        anchorY={pickerAnchor.y}
+        onClose={() => setPickerVisible(false)}
+        onPick={(key) => applyReaction(key)}
+      />
       <ReportSheet
         visible={showReport}
         targetType="post"

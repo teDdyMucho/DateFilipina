@@ -27,6 +27,7 @@ import { useSheet } from '@/components/GlobalActionSheet';
 import { useDeletePost, useUpdatePost } from '@/hooks/useFeed';
 import { ActionSheet } from '@/components/ActionSheet';
 import { CommentsModal } from '@/components/CommentsModal';
+import { LikersModal } from '@/components/LikersModal';
 import { MediaViewer, MediaItem } from '@/components/MediaViewer';
 import { COIN_PACKAGES, GIFTS } from '@/constants';
 import { formatDistanceToNow } from 'date-fns';
@@ -157,6 +158,7 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
   const [showActionSheet, setShowActionSheet] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
+  const [showLikers, setShowLikers] = useState(false);
   const [editCaption, setEditCaption] = useState(post.caption || '');
 
   const urls: string[] = post.media_urls || [];
@@ -190,7 +192,15 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
         <View style={pc.actionsLeft}>
           <View style={pc.actionBtn}>
             <Ionicons name="heart-outline" size={22} color={Colors.textSecondary} />
-            <Text style={pc.actionCount}>{post.likes_count || 0}</Text>
+            <TouchableOpacity
+              onPress={() => { if ((post.likes_count || 0) > 0) setShowLikers(true); }}
+              disabled={(post.likes_count || 0) === 0}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+            >
+              <Text style={[pc.actionCount, (post.likes_count || 0) > 0 && { textDecorationLine: 'underline' }]}>
+                {post.likes_count || 0}
+              </Text>
+            </TouchableOpacity>
           </View>
           <TouchableOpacity style={pc.actionBtn} onPress={handleComments} activeOpacity={0.7}>
             <Ionicons name="chatbubble-outline" size={21} color={Colors.textSecondary} />
@@ -203,6 +213,7 @@ function MyPostCard({ post, user }: { post: any; user: any }) {
       </View>
 
       <CommentsModal visible={showComments} postId={post.id} onClose={() => setShowComments(false)} />
+      <LikersModal visible={showLikers} postId={post.id} onClose={() => setShowLikers(false)} />
 
       <ActionSheet
         visible={showActionSheet}

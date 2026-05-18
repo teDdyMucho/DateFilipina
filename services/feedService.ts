@@ -2,6 +2,25 @@ import { supabase } from './supabase';
 import { FeedPost } from '@/constants/types';
 import { fixAvatarUri } from '@/constants/avatarUtils';
 
+// Facebook-style post reactions. Each user has at most one reaction per post.
+// 'love' is the default (a plain tap on the heart icon).
+export type PostReactionKey = 'love' | 'wow' | 'hot' | 'sexy' | 'sad' | 'angry';
+
+export const POST_REACTIONS: ReadonlyArray<{
+  key: PostReactionKey;
+  icon: string;     // MaterialCommunityIcons name
+  color: string;    // tint / bg color for the icon bubble
+  emoji: string;    // textual fallback (notifications etc.)
+  label: string;
+}> = [
+  { key: 'love',  icon: 'heart',             color: '#FF3D6E', emoji: '❤️', label: 'Love' },
+  { key: 'wow',   icon: 'emoticon-excited',  color: '#FFB400', emoji: '😮', label: 'Wow' },
+  { key: 'hot',   icon: 'fire',              color: '#FF6B35', emoji: '🔥', label: 'Hot' },
+  { key: 'sexy',  icon: 'emoticon-kiss',     color: '#FF1493', emoji: '🥵', label: 'Sexy' },
+  { key: 'sad',   icon: 'emoticon-sad',      color: '#5E9EFF', emoji: '😢', label: 'Sad' },
+  { key: 'angry', icon: 'emoticon-angry',    color: '#FF3B30', emoji: '😡', label: 'Angry' },
+];
+
 export const feedService = {
   async getFeed(userId: string): Promise<FeedPost[]> {
     // Admin-hidden posts are filtered out; pinned posts surface first.
@@ -63,14 +82,32 @@ export const feedService = {
     if (!data) return [];
 
     const postIds = data.map((p: any) => p.id);
-    let likedSet = new Set<string>();
+    // Fetch the user's reactions for these posts (post_id → reaction key).
+    // Falls back to a tolerant select that ignores missing `reaction` column.
+    const myReactions = new Map<string, PostReactionKey>();
     if (postIds.length > 0) {
-      const { data: likes } = await supabase
+      let likes: any[] | null = null;
+      const tryFull = await supabase
         .from('post_likes')
-        .select('post_id')
+        .select('post_id, reaction')
         .eq('user_id', userId)
         .in('post_id', postIds);
-      if (likes) likes.forEach((l: any) => likedSet.add(l.post_id));
+      if (tryFull.error && /reaction/i.test(tryFull.error.message || '')) {
+        const fallback = await supabase
+          .from('post_likes')
+          .select('post_id')
+          .eq('user_id', userId)
+          .in('post_id', postIds);
+        likes = fallback.data;
+      } else {
+        likes = tryFull.data;
+      }
+      if (likes) {
+        likes.forEach((l: any) => {
+          const r = (l.reaction as PostReactionKey) || 'love';
+          myReactions.set(l.post_id, r);
+        });
+      }
     }
 
     // Shuffle non-pinned posts so the home feed feels fresh on each refresh.
@@ -112,7 +149,8 @@ export const feedService = {
       caption: row.caption || '',
       likes: row.likes_count || 0,
       comments: row.comments_count || 0,
-      isLiked: likedSet.has(row.id),
+      isLiked: myReactions.has(row.id),
+      myReaction: myReactions.get(row.id) ?? null,
       timestamp: new Date(row.created_at),
       sharedFrom: row.shared_from_user_id ? {
         userId: row.shared_from_user_id,
@@ -123,12 +161,69 @@ export const feedService = {
     });
   },
 
-  async toggleLike(postId: string, userId: string, isLiked: boolean): Promise<void> {
-    if (isLiked) {
+  // Returns the list of users who liked a post (most-recent first).
+  async getPostLikers(postId: string): Promise<Array<{ id: string; name: string; avatar: string; isOnline: boolean; isVerified: boolean; likedAt: Date }>> {
+    const { data, error } = await supabase
+      .from('post_likes')
+      .select(`
+        created_at,
+        profiles!post_likes_user_id_fkey ( id, name, avatar_url, is_online, is_verified )
+      `)
+      .eq('post_id', postId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error || !data) return [];
+    return data
+      .filter((r: any) => r.profiles)
+      .map((r: any) => ({
+        id: r.profiles.id,
+        name: r.profiles.name || 'User',
+        avatar: fixAvatarUri(r.profiles.avatar_url, r.profiles.id),
+        isOnline: !!r.profiles.is_online,
+        isVerified: !!r.profiles.is_verified,
+        likedAt: new Date(r.created_at),
+      }));
+  },
+
+  // Set or change the current user's reaction on a post. Pass null to remove.
+  // Falls back to plain like/unlike if the `reaction` column hasn't been
+  // migrated yet, so the app keeps working pre-migration.
+  async reactToPost(postId: string, userId: string, reaction: PostReactionKey | null): Promise<void> {
+    if (reaction === null) {
       await supabase.from('post_likes').delete().eq('post_id', postId).eq('user_id', userId);
-    } else {
-      await supabase.from('post_likes').insert({ post_id: postId, user_id: userId });
+      return;
     }
+    // Check if row exists — update vs insert
+    const { data: existing } = await supabase
+      .from('post_likes')
+      .select('id')
+      .eq('post_id', postId)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (existing?.id) {
+      const res = await supabase
+        .from('post_likes')
+        .update({ reaction })
+        .eq('id', existing.id);
+      if (res.error && /reaction/i.test(res.error.message || '')) {
+        // Column missing — nothing to update, the row already exists
+        return;
+      }
+      if (res.error) throw new Error(res.error.message);
+      return;
+    }
+    let res = await supabase.from('post_likes').insert({ post_id: postId, user_id: userId, reaction });
+    if (res.error && /reaction/i.test(res.error.message || '')) {
+      // Column missing — insert without reaction (legacy schema)
+      res = await supabase.from('post_likes').insert({ post_id: postId, user_id: userId });
+    }
+    if (res.error) throw new Error(res.error.message);
+  },
+
+  // Backwards-compat shim — used elsewhere in the codebase. A plain tap on
+  // the heart now toggles between no-reaction and 'love'.
+  async toggleLike(postId: string, userId: string, isLiked: boolean): Promise<void> {
+    return this.reactToPost(postId, userId, isLiked ? null : 'love');
   },
 
   async uploadMedia(uri: string, userId: string, mediaType: 'photo' | 'video'): Promise<string> {
@@ -157,7 +252,7 @@ export const feedService = {
         Authorization: `Bearer ${session.access_token}`,
         'x-upsert': 'false',
       },
-      body: formData,
+      body: formData as any,
     });
 
     if (!res.ok) {

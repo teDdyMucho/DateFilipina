@@ -23,6 +23,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useSheet } from '@/components/GlobalActionSheet';
 import { MediaViewer, MediaItem } from '@/components/MediaViewer';
 import { CommentsModal } from '@/components/CommentsModal';
+import { LikersModal } from '@/components/LikersModal';
 import { ReportSheet } from '@/components/ReportSheet';
 
 const { width: W } = Dimensions.get('window');
@@ -102,6 +103,7 @@ function PublicPostCard({ post, profile }: { post: any; profile: any }) {
   const urls: string[] = post.media_urls || [];
   const types = getPostMediaTypes(post);
   const [showComments, setShowComments] = useState(false);
+  const [showLikers, setShowLikers] = useState(false);
   const { mutate: shareToFeed } = useShareToFeed();
   const showSheet = useSheet();
 
@@ -173,7 +175,15 @@ function PublicPostCard({ post, profile }: { post: any; profile: any }) {
         <View style={s.actionsLeft}>
           <View style={s.actionBtn}>
             <Ionicons name="heart-outline" size={22} color={Colors.textSecondary} />
-            <Text style={s.actionCount}>{post.likes_count || 0}</Text>
+            <TouchableOpacity
+              onPress={() => { if ((post.likes_count || 0) > 0) setShowLikers(true); }}
+              disabled={(post.likes_count || 0) === 0}
+              hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+            >
+              <Text style={[s.actionCount, (post.likes_count || 0) > 0 && { textDecorationLine: 'underline' }]}>
+                {post.likes_count || 0}
+              </Text>
+            </TouchableOpacity>
           </View>
           <TouchableOpacity style={s.actionBtn} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); setShowComments(true); }} activeOpacity={0.7}>
             <Ionicons name="chatbubble-outline" size={21} color={Colors.textSecondary} />
@@ -186,6 +196,7 @@ function PublicPostCard({ post, profile }: { post: any; profile: any }) {
       </View>
 
       <CommentsModal visible={showComments} postId={post.id} onClose={() => setShowComments(false)} />
+      <LikersModal visible={showLikers} postId={post.id} onClose={() => setShowLikers(false)} />
     </View>
   );
 }

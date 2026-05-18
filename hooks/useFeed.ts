@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { feedService } from '@/services/feedService';
+import { feedService, PostReactionKey } from '@/services/feedService';
 import { useAuthStore } from '@/store/authStore';
 import { FeedPost } from '@/constants/types';
 
@@ -13,31 +13,54 @@ export function useFeed() {
   });
 }
 
+// Fetches the list of users who liked a specific post. Used by LikersModal.
+export function usePostLikers(postId: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ['postLikers', postId],
+    queryFn: () => feedService.getPostLikers(postId!),
+    enabled: !!postId && enabled,
+    staleTime: 10_000,
+  });
+}
+
+// Apply a post reaction. `reaction = null` removes the current user's
+// reaction. Otherwise sets/changes it (love/wow/hot/sexy/sad/angry).
+// The simpler legacy useLikePost interface (boolean isLiked) still works
+// via the toggleLike shim in feedService.
 export function useLikePost() {
   const qc = useQueryClient();
   const user = useAuthStore(s => s.user);
 
   return useMutation({
-    mutationFn: ({ postId, isLiked }: { postId: string; isLiked: boolean }) =>
-      feedService.toggleLike(postId, user!.id, isLiked),
-    onMutate: async ({ postId, isLiked }) => {
+    mutationFn: ({ postId, reaction }: { postId: string; reaction: PostReactionKey | null }) =>
+      feedService.reactToPost(postId, user!.id, reaction),
+    onMutate: async ({ postId, reaction }) => {
       const key = ['feed', user?.id];
       await qc.cancelQueries({ queryKey: key });
       const prev = qc.getQueryData<FeedPost[]>(key);
       qc.setQueryData<FeedPost[]>(key, posts =>
-        posts?.map(p => p.id === postId
-          ? { ...p, isLiked: !isLiked, likes: isLiked ? p.likes - 1 : p.likes + 1 }
-          : p
-        )
+        posts?.map(p => {
+          if (p.id !== postId) return p;
+          const wasLiked = p.isLiked;
+          const willBeLiked = reaction !== null;
+          // Count goes up only when going from no-reaction → some reaction
+          const delta = (willBeLiked ? 1 : 0) - (wasLiked ? 1 : 0);
+          return {
+            ...p,
+            isLiked: willBeLiked,
+            myReaction: reaction,
+            likes: Math.max(0, p.likes + delta),
+          };
+        })
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(['feed', user?.id], ctx.prev);
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: ['feed', user?.id] });
-    },
+    // No onSettled invalidate — the optimistic update is already accurate,
+    // and refetching causes feedService.getFeed to re-shuffle non-pinned
+    // posts (intentional on pull-to-refresh, but jarring after a tap).
   });
 }
 

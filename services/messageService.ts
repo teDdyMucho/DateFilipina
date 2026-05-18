@@ -112,6 +112,7 @@ export const messageService = {
       timestamp: new Date(row.created_at),
       read: row.is_read,
       imageUrl: row.media_url || undefined,
+      replyToStoryId: row.reply_to_story_id || undefined,
     }));
   },
 
@@ -174,19 +175,29 @@ export const messageService = {
     }
   },
 
-  async sendMessage(conversationId: string, senderId: string, content: string, type = 'text'): Promise<Message> {
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: senderId,
-        content,
-        message_type: type,
-      })
-      .select()
-      .single();
+  async sendMessage(
+    conversationId: string,
+    senderId: string,
+    content: string,
+    type = 'text',
+    replyToStoryId?: string,
+  ): Promise<Message> {
+    const payload: any = {
+      conversation_id: conversationId,
+      sender_id: senderId,
+      content,
+      message_type: type,
+    };
+    if (replyToStoryId) payload.reply_to_story_id = replyToStoryId;
 
-    if (error) throw new Error(error.message);
+    // If the reply_to_story_id column hasn't been added yet, retry without it.
+    let res = await supabase.from('messages').insert(payload).select().single();
+    if (res.error && /reply_to_story_id/i.test(res.error.message)) {
+      delete payload.reply_to_story_id;
+      res = await supabase.from('messages').insert(payload).select().single();
+    }
+    if (res.error) throw new Error(res.error.message);
+    const data = res.data;
 
     return {
       id: data.id,
@@ -196,6 +207,7 @@ export const messageService = {
       type: data.message_type,
       timestamp: new Date(data.created_at),
       read: false,
+      replyToStoryId: data.reply_to_story_id || undefined,
     };
   },
 
@@ -283,7 +295,7 @@ export const messageService = {
         Authorization: `Bearer ${session.access_token}`,
         'x-upsert': 'true',
       },
-      body: formData,
+      body: formData as any,
     });
 
     if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
